@@ -1,0 +1,25 @@
+{
+  "name": "m365-ask",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal programmatic M365 Copilot text generation (auth + one WebSocket chat client).",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "m365-ask": "./cli.js"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@azure/msal-node": "^5.1.1",
+    "playwright": "^1.58.2",
+    "ws": "^8.20.0"
+  }
+}

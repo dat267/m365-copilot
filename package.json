@@ -1,12 +1,12 @@
 {
-  "name": "m365-ask",
+  "name": "m365-copilot",
   "version": "0.1.0",
   "private": true,
   "description": "Minimal programmatic M365 Copilot text generation (auth + one WebSocket chat client).",
   "type": "module",
   "license": "MIT",
   "bin": {
-    "m365-ask": "./cli.js"
+    "m365-copilot": "./cli.js"
   },
   "exports": {
     ".": "./src/index.js"

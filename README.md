@@ -1,4 +1,4 @@
-# m365-ask
+# m365-copilot
 
 Minimal programmatic **M365 Copilot text generation** — no proxy, no HTTP server.
 Just auth + one WebSocket chat client, so you can prompt M365 Copilot from Node.
@@ -78,7 +78,7 @@ Playwright remains the fallback: if the refresh token expires or is revoked,
 ### As a library
 
 ```js
-import { ask, M365Session } from "m365-ask";
+import { ask, M365Session } from "m365-copilot";
 
 // one-shot
 const text = await ask("Write a regex that matches ISO dates.");

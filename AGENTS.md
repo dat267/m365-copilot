@@ -4,7 +4,7 @@ Guidance for AI agents (and humans) working in this repo.
 
 ## What this is
 
-`m365-ask` is a **minimal, standalone** Node library + CLI for programmatically
+`m365-copilot` is a **minimal, standalone** Node library + CLI for programmatically
 prompting **Microsoft 365 Copilot** for text generation. No proxy, no HTTP
 server — just auth plus one SignalR/WebSocket chat client.
 

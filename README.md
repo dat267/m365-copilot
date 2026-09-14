@@ -152,8 +152,15 @@ cli.js          CLI (one-shot + REPL)
 src/auth.js     MSAL PKCE + interactive sign-in + token cache
 src/client.js   SignalR/WebSocket chat client (one turn per WS)
 src/index.js    public API: ask() + M365Session
+src/session-store.js  persisted default conversation (session.json)
+src/prompt.js   CLI context/prompt assembly (--context, --new)
+src/ticket.js   Freshservice ticket fetch/render + PII redaction
 src/log.js      optional debug logging (M365_DEBUG=1)
+scripts/        ask-ticket.js (repo imports) + ask-ticket-standalone.mjs (self-contained)
 ```
+
+The ticket scripts redact email addresses and phone numbers from the ticket
+before sending it to Copilot.
 
 This is a trimmed extraction of `m365-copilot-proxy` (same authors' reverse
 engineering); it keeps only the plain-chat path. No tool-calling, agents, or

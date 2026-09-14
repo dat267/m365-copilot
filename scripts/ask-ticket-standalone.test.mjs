@@ -11,6 +11,7 @@ import {
   parseArgs,
   wsConnect,
   chooseRefreshToken,
+  redactPII,
 } from "./ask-ticket-standalone.mjs";
 
 // Builds an unmasked server->client frame (client frames are masked, server's
@@ -187,4 +188,25 @@ test("chooseRefreshToken prefers env, then the rotated saved token, then config"
   );
   assert.equal(chooseRefreshToken({ saved: { refreshToken: "s" }, config: { refreshToken: "c" } }), "s");
   assert.equal(chooseRefreshToken({ config: { refreshToken: "c" } }), "c");
+});
+
+test("redactPII replaces email addresses", () => {
+  assert.equal(redactPII("Email omar.saleh@example.com now"), "Email [redacted-email] now");
+});
+
+test("redactPII replaces phone numbers in common formats", () => {
+  const cases = [
+    ["call +1 (555) 123-4567", "call [redacted-phone]"],
+    ["call 555-123-4567", "call [redacted-phone]"],
+    ["call (555) 123-4567", "call [redacted-phone]"],
+    ["call +44 20 7946 0958", "call [redacted-phone]"],
+    ["call 07123456789", "call [redacted-phone]"],
+    ["call 020 7946 0958", "call [redacted-phone]"],
+  ];
+  for (const [input, expected] of cases) assert.equal(redactPII(input), expected, input);
+});
+
+test("redactPII leaves dates, ticket ids and references alone", () => {
+  const text = "Created 2026-08-01T10:30:00Z, ticket #10100, ref INC0012345";
+  assert.equal(redactPII(text), text);
 });

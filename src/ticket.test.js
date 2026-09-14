@@ -8,6 +8,7 @@ import {
   resolveConfig,
   parseTicketArgs,
   makeFreshserviceGet,
+  redactPII,
   TRUNCATION_MARKER,
 } from "./ticket.js";
 
@@ -226,4 +227,25 @@ test("makeFreshserviceGet throws on a non-OK response", async () => {
   const get = makeFreshserviceGet({ baseUrl: "https://x", session: "s", fetchImpl });
 
   await assert.rejects(() => get("tickets/1"), /401/);
+});
+
+test("redactPII replaces email addresses", () => {
+  assert.equal(redactPII("Email omar.saleh@example.com now"), "Email [redacted-email] now");
+});
+
+test("redactPII replaces phone numbers in common formats", () => {
+  const cases = [
+    ["call +1 (555) 123-4567", "call [redacted-phone]"],
+    ["call 555-123-4567", "call [redacted-phone]"],
+    ["call (555) 123-4567", "call [redacted-phone]"],
+    ["call +44 20 7946 0958", "call [redacted-phone]"],
+    ["call 07123456789", "call [redacted-phone]"],
+    ["call 020 7946 0958", "call [redacted-phone]"],
+  ];
+  for (const [input, expected] of cases) assert.equal(redactPII(input), expected, input);
+});
+
+test("redactPII leaves dates, ticket ids and references alone", () => {
+  const text = "Created 2026-08-01T10:30:00Z, ticket #10100, ref INC0012345";
+  assert.equal(redactPII(text), text);
 });

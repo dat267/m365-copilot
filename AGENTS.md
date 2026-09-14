@@ -64,9 +64,12 @@ generation, no automated password/TOTP login.
 | `src/auth.js` | MSAL PKCE, silent refresh, interactive sign-in, token cache, raw refresh-token grant, `decodeJwt` |
 | `src/client.js` | `CopilotSession` — one WS turn (handshake, `Metrics` frame, frame dispatch, delta folding), and the `tone` map |
 | `src/session-store.js` | persisted default conversation (`session.json`): id/turn-count resolution, load/save |
+| `src/prompt.js` | CLI context/prompt assembly (`--context`, `--new`), no I/O |
+| `src/ticket.js` | Freshservice ticket fetch/render + `redactPII` (used by `scripts/ask-ticket.js`) |
 | `src/index.js` | Public API: `ask()` (one-shot) and `M365Session` (multi-turn, handles auth + reconnect) |
 | `src/log.js` | Optional debug logging (`M365_DEBUG=1` → `~/.config/m365-ask/debug.log`) |
 | `examples/` | Runnable examples |
+| `scripts/` | `ask-ticket.js` (repo imports) and `ask-ticket-standalone.mjs` (Node built-ins only) |
 
 ESM, `.js`-suffixed relative imports. No TypeScript, no bundler.
 

@@ -169,6 +169,26 @@ export function makeFreshserviceGet({ baseUrl, session, fetchImpl = fetch }) {
   };
 }
 
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+// Ordered: international (+CC), parenthesised, NANP 3-3-4, bare long runs,
+// then 0-prefixed national numbers. Deliberately does not match ISO dates
+// (2026-08-01) or short ticket/reference ids.
+const PHONE_PATTERNS = [
+  /\+\d[\d \t().-]{5,}\d/g,
+  /\(\d{3}\)[ .-]?\d{3}[ .-]\d{4}/g,
+  /\b\d{3}[ .-]\d{3}[ .-]\d{4}\b/g,
+  /\b\d{10,15}\b/g,
+  /\b0\d{1,3}[ .-]\d{3,4}[ .-]?\d{3,4}\b/g,
+  /\b0\d{9,10}\b/g,
+];
+
+/** Redacts email addresses and phone numbers so they are not sent to the model. */
+export function redactPII(text) {
+  let out = String(text ?? "").replace(EMAIL_RE, "[redacted-email]");
+  for (const re of PHONE_PATTERNS) out = out.replace(re, "[redacted-phone]");
+  return out;
+}
+
 export function truncateContext(text, maxChars) {
   if (text.length <= maxChars) return text;
   if (maxChars <= TRUNCATION_MARKER.length) return text.slice(0, maxChars);

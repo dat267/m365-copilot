@@ -12,7 +12,8 @@
     ".": "./src/index.js"
   },
   "scripts": {
-    "start": "node cli.js"
+    "start": "node cli.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"

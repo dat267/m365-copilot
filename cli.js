@@ -1,19 +1,30 @@
 #!/usr/bin/env node
-// CLI for m365-ask.
+// CLI for m365-copilot.
 //
 //   node cli.js "prompt"                    # one-shot
 //   node cli.js --model=claude "prompt"     # pick a tone/model
 //   node cli.js                             # interactive REPL (one conversation)
+//
+// Feed a large payload (e.g. a ticket export) alongside the instruction:
+//
+//   fsvc tickets show 10100 | node cli.js --context - "Draft a customer reply."
+//   node cli.js --context ticket.md "Summarize this in 3 bullets."
 
+import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { M365Session, ask, getAvailableModels } from "./src/index.js";
+import { parseArgs, loadContext, buildPrompt } from "./src/prompt.js";
 
-const argv = process.argv.slice(2);
+const { help, model, context: contextSpec, prompt } = parseArgs(process.argv.slice(2));
 
-if (argv.includes("--help") || argv.includes("-h")) {
-  console.log(`Usage: m365-ask [--model=<id>] "prompt"
+if (help) {
+  console.log(`Usage: m365-copilot [--model=<id>] [--context <file|->] "prompt"
 
 Models: ${getAvailableModels().join(", ")}
+
+Options:
+  --context <file|->    prepend a file (or stdin with -) to the prompt as data
+                        (use with a data producer, e.g. \`fsvc tickets show 10100 | cli --context -\`)
 
 With no prompt, starts an interactive REPL (single conversation, streamed).
 Env:
@@ -27,20 +38,28 @@ Env:
   process.exit(0);
 }
 
-let model = "m365-copilot";
-const rest = [];
-for (const a of argv) {
-  if (a.startsWith("--model=")) model = a.slice("--model=".length);
-  else rest.push(a);
+async function readStdin() {
+  let data = "";
+  process.stdin.setEncoding("utf8");
+  for await (const chunk of process.stdin) data += chunk;
+  return data;
 }
 
-if (rest.length > 0) {
-  const text = await ask(rest.join(" "), { model });
+const context = await loadContext(contextSpec, { readFile, readStdin });
+
+if (prompt) {
+  const text = await ask(buildPrompt(context, prompt), { model });
   process.stdout.write(text + "\n");
 } else {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const session = new M365Session({ model });
   console.error(`M365 Copilot [model=${model}]. Type a prompt; Ctrl-D to exit.`);
+  if (context) {
+    // Load the payload as the first turn so follow-ups share its context.
+    const stream = await session.chat(buildPrompt(context, ""), { signal: AbortSignal.timeout(300_000) });
+    for await (const delta of stream) process.stdout.write(delta);
+    process.stdout.write("\n");
+  }
   while (true) {
     let line;
     try {

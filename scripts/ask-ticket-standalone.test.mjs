@@ -210,3 +210,15 @@ test("redactPII leaves dates, ticket ids and references alone", () => {
   const text = "Created 2026-08-01T10:30:00Z, ticket #10100, ref INC0012345";
   assert.equal(redactPII(text), text);
 });
+
+test("buildPrompt prepends an optional system prompt", () => {
+  const prompt = buildPrompt("DATA", "do it", "You are terse.");
+  assert.ok(prompt.startsWith("You are terse.\n\n"), "system prompt first");
+  assert.ok(prompt.includes("<<<CONTEXT\nDATA\nCONTEXT>>>"));
+  assert.ok(prompt.endsWith("do it"));
+});
+
+test("buildPrompt omits an empty or missing system prompt", () => {
+  assert.ok(!buildPrompt("DATA", "do it", "").startsWith("\n"));
+  assert.ok(buildPrompt("DATA", "do it").startsWith("The text between the CONTEXT"));
+});

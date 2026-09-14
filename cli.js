@@ -15,16 +15,19 @@ import { createInterface } from "node:readline/promises";
 import { M365Session, ask, getAvailableModels } from "./src/index.js";
 import { parseArgs, loadContext, buildPrompt } from "./src/prompt.js";
 
-const { help, model, context: contextSpec, prompt } = parseArgs(process.argv.slice(2));
+const { help, model, context: contextSpec, prompt, fresh } = parseArgs(process.argv.slice(2));
 
 if (help) {
-  console.log(`Usage: m365-copilot [--model=<id>] [--context <file|->] "prompt"
+  console.log(`Usage: m365-copilot [--model=<id>] [--context <file|->] [--new] "prompt"
 
 Models: ${getAvailableModels().join(", ")}
 
 Options:
   --context <file|->    prepend a file (or stdin with -) to the prompt as data
                         (use with a data producer, e.g. \`fsvc tickets show 10100 | cli --context -\`)
+  --new                 start a new conversation instead of resuming the saved one
+                        (conversations are reused across runs by default; opt out
+                        entirely with M365_NO_SESSION_PERSIST=1)
 
 With no prompt, starts an interactive REPL (single conversation, streamed).
 Env:
@@ -48,11 +51,11 @@ async function readStdin() {
 const context = await loadContext(contextSpec, { readFile, readStdin });
 
 if (prompt) {
-  const text = await ask(buildPrompt(context, prompt), { model });
+  const text = await ask(buildPrompt(context, prompt), { model, fresh });
   process.stdout.write(text + "\n");
 } else {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const session = new M365Session({ model });
+  const session = new M365Session({ model, fresh });
   console.error(`M365 Copilot [model=${model}]. Type a prompt; Ctrl-D to exit.`);
   if (context) {
     // Load the payload as the first turn so follow-ups share its context.

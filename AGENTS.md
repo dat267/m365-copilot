@@ -25,9 +25,11 @@ generation, no automated password/TOTP login.
 
 1. **Every M365 turn is quota and risk.** Account-level throttling tracks
    *conversations started* per unit time, and each conversation is capped at
-   ~600 messages. Never fire concurrent requests. Reuse one `M365Session`
-   (one `conversationId`) for follow-ups — a fresh conversation per prompt is
-   what burns the thread budget. Space out test runs.
+   ~600 messages. Never fire concurrent requests. One `M365Session`
+   (one `conversationId`) is persisted in `session.json` and reused across runs
+   — a fresh conversation per prompt is what burns the thread budget; start one
+   only explicitly (`{ fresh: true }`, `newConversation()`, `--new`). Space out
+   test runs.
 
 2. **An empty reply is usually NOT a bug and NOT always throttling.**
    - `messageType: "Disengaged"` → the safety filter refused (empty content).
@@ -61,6 +63,7 @@ generation, no automated password/TOTP login.
 | `cli.js` | CLI: one-shot (`node cli.js "prompt"`) and interactive REPL |
 | `src/auth.js` | MSAL PKCE, silent refresh, interactive sign-in, token cache, raw refresh-token grant, `decodeJwt` |
 | `src/client.js` | `CopilotSession` — one WS turn (handshake, `Metrics` frame, frame dispatch, delta folding), and the `tone` map |
+| `src/session-store.js` | persisted default conversation (`session.json`): id/turn-count resolution, load/save |
 | `src/index.js` | Public API: `ask()` (one-shot) and `M365Session` (multi-turn, handles auth + reconnect) |
 | `src/log.js` | Optional debug logging (`M365_DEBUG=1` → `~/.config/m365-ask/debug.log`) |
 | `examples/` | Runnable examples |
@@ -83,7 +86,7 @@ against the live API. Verify changes end-to-end (below).
 ## Running against real M365
 
 Config/cache live in **`~/.config/m365-ask/`** (`msal-cache.json`,
-`browser-profile/`) — deliberately separate from the proxy's
+`browser-profile/`, `session.json`) — deliberately separate from the proxy's
 `~/.config/opencode-m365/`. Override with `M365_CONFIG_DIR`,
 `M365_CACHE_FILE`, `M365_BROWSER_PROFILE`.
 

@@ -142,14 +142,16 @@ export function resolveConfig(env, io) {
 export function parseTicketArgs(argv) {
   let maxChars = 60000;
   let follow = false;
+  let fresh = false;
   const rest = [];
   for (const a of argv) {
     if (a.startsWith("--max-chars=")) maxChars = Number(a.slice("--max-chars=".length));
     else if (a === "--follow") follow = true;
+    else if (a === "--new") fresh = true;
     else rest.push(a);
   }
   const [id, ...instruction] = rest;
-  return { id: Number(id), instruction: instruction.join(" "), maxChars, follow };
+  return { id: Number(id), instruction: instruction.join(" "), maxChars, follow, fresh };
 }
 
 /** Builds the injected `get(path, query)` used by `fetchTicket`, bound to a

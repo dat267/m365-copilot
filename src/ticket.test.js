@@ -189,7 +189,12 @@ test("parseTicketArgs parses the id, instruction and default maxChars", () => {
     instruction: "draft a reply",
     maxChars: 60000,
     follow: false,
+    fresh: false,
   });
+});
+
+test("parseTicketArgs honours --new", () => {
+  assert.equal(parseTicketArgs(["--new", "10100", "hi"]).fresh, true);
 });
 
 test("parseTicketArgs honours --max-chars", () => {

@@ -25,6 +25,9 @@ node cli.js --model=claude "..."
 
 # Interactive REPL (streams, reuses one conversation)
 node cli.js
+
+# Conversations are persisted and reused across runs; --new starts a fresh one
+node cli.js --new "..."
 ```
 
 First run opens a **visible browser** — sign in to Microsoft 365 once. The token
@@ -91,6 +94,12 @@ for await (const delta of stream) process.stdout.write(delta);
 console.log(await ask("What is my name?", { session })); // -> Ada
 ```
 
+`M365Session` persists its `conversationId` (`~/.config/m365-ask/session.json`)
+and resumes it on later runs, so separate invocations reuse one M365
+conversation instead of burning a new one. Start fresh with
+`session.newConversation()` or `new M365Session({ fresh: true })`; set
+`M365_NO_SESSION_PERSIST=1` to disable persistence entirely.
+
 `stream` is async-iterable (yields text deltas) and exposes after completion:
 
 | getter | meaning |
@@ -127,10 +136,10 @@ M365_INSECURE=1 node cli.js "hi"
 ```
 
 **Throttling.** M365 limits *conversations started* per unit time, and each
-conversation is capped at ~600 messages. Reuse an `M365Session` for follow-ups
-(one conversation) rather than calling `ask()` in a loop (a new conversation
-each time). If turns start returning empty, back off — it's account-level
-throttle, not a content problem.
+conversation is capped at ~600 messages. Conversations are reused across runs by
+default, so `ask()` / `M365Session` do not start a new one per prompt — only
+`{ fresh: true }`, `newConversation()`, or `--new` does. If turns start returning
+empty, back off — it's account-level throttle, not a content problem.
 
 **Disengaged.** Prompt-injection-shaped or very large tool-style prompts get a
 `messageType:"Disengaged"` bot message with empty content — a refusal, not

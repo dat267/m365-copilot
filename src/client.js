@@ -125,11 +125,13 @@ export function foldStreamText(answer, next) {
  * sessionId/conversationId are reused so M365 threads the server-side context.
  */
 export class CopilotSession {
-  constructor({ sessionId, conversationId } = {}) {
+  constructor({ sessionId, conversationId, turnCount = 0 } = {}) {
     this.sessionId = sessionId ?? crypto.randomUUID();
     this.conversationId = conversationId ?? crypto.randomUUID();
-    this.turnCount = 0;
-    log.info(`New session: sid=${this.sessionId}, cid=${this.conversationId}`);
+    // Seeded from a persisted conversation so `isStartOfSession` is false on a
+    // resumed thread (proxy docs: true only on turn 0).
+    this.turnCount = turnCount;
+    log.info(`New session: sid=${this.sessionId}, cid=${this.conversationId}, turn=${turnCount}`);
   }
 
   /**

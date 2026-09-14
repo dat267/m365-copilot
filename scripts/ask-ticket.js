@@ -6,6 +6,10 @@
 //   node scripts/ask-ticket.js 10100 "Draft a concise customer reply."
 //   node scripts/ask-ticket.js --follow 10100 "Summarize the issue and action items."
 //   node scripts/ask-ticket.js --max-chars=40000 10100 "What is blocking this ticket?"
+//   node scripts/ask-ticket.js --new 10100 "Start a fresh conversation for this ticket."
+//
+// The M365 conversation is persisted and reused across runs by default; --new
+// forces a fresh one (M365_NO_SESSION_PERSIST=1 disables persistence).
 //
 // Credentials/config are resolved exactly like fsvc (env vars first, then
 // FSVC_CONFIG_FILE → ./fsvc.json → ~/.config/fsvc/fsvc.json):
@@ -23,9 +27,9 @@ import { M365Session } from "../src/index.js";
 import { buildPrompt } from "../src/prompt.js";
 import { parseTicketArgs, resolveConfig, fetchTicket, renderTicket, truncateContext, makeFreshserviceGet } from "../src/ticket.js";
 
-const USAGE = 'usage: ask-ticket.js [--max-chars=N] [--follow] <ticket-id> "instruction"';
+const USAGE = 'usage: ask-ticket.js [--max-chars=N] [--follow] [--new] <ticket-id> "instruction"';
 
-const { id, instruction, maxChars, follow } = parseTicketArgs(process.argv.slice(2));
+const { id, instruction, maxChars, follow, fresh } = parseTicketArgs(process.argv.slice(2));
 if (!Number.isInteger(id) || id <= 0) {
   console.error(USAGE);
   process.exit(2);
@@ -52,7 +56,7 @@ if (context.length < raw.length) {
   console.error(`[ask-ticket] payload truncated ${raw.length} → ${context.length} chars (--max-chars=${maxChars})`);
 }
 
-const copilot = new M365Session();
+const copilot = new M365Session({ fresh });
 
 async function turn(message, label) {
   const stream = await copilot.chat(message, { signal: AbortSignal.timeout(300_000) });

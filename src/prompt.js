@@ -12,17 +12,19 @@ export async function loadContext(spec, io) {
 export function parseArgs(argv) {
   let model = "m365-copilot";
   let context = null;
+  let fresh = false;
   let help = false;
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--help" || a === "-h") help = true;
+    else if (a === "--new") fresh = true;
     else if (a.startsWith("--model=")) model = a.slice("--model=".length);
     else if (a.startsWith("--context=")) context = a.slice("--context=".length);
     else if (a === "--context") context = argv[++i];
     else rest.push(a);
   }
-  return { help, model, context, prompt: rest.join(" ") };
+  return { help, model, context, fresh, prompt: rest.join(" ") };
 }
 
 export function buildPrompt(context, instruction) {

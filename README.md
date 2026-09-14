@@ -161,9 +161,8 @@ constant). File size caps at **512 MB**, and an image the safety filter rejects
 fails with **HTTP 417**. Uploads are sent sequentially — M365 throttles on
 concurrent requests.
 
-`uploadFile()` returns a `docId`; wiring that into the outgoing turn as a file
-annotation is not implemented yet (it needs a captured frame to confirm the
-exact field).
+`uploadFile()` returns a `docId`; pass upload results as `chat(text, { attachments })`
+to attach them to a turn (uploading alone does nothing).
 
 ## Freshservice credentials
 
@@ -369,9 +368,10 @@ src/auth.js     MSAL PKCE + interactive sign-in + token cache
 src/client.js   SignalR/WebSocket chat client (one turn per WS)
 src/chat-api.js history/deletion/upload REST (GetChats, GetConversation, DeleteConversation, UploadFile)
 src/attachments.js attachment planning: isImage, planImageBatches, manifest rendering
+src/graph-upload.js  document upload to OneDrive copilotuploads + LocalFile annotations
 src/index.js    public API: ask() + M365Session
 src/session-store.js  persisted default conversation (session.json)
-src/prompt.js   CLI context/prompt assembly (--context, --new)
+src/prompt.js   CLI context/prompt assembly (--context, --new, --temporary)
 src/ticket.js   Freshservice ticket fetch/render + PII redaction
 src/log.js      optional debug logging (M365_DEBUG=1)
 scripts/        ask-ticket.js (repo imports), ask-ticket-standalone.ps1 (self-contained, pwsh 7+)

@@ -64,12 +64,12 @@ generation, no automated password/TOTP login.
 |---|---|
 | `cli.js` | CLI: one-shot (`node cli.js "prompt"`) and interactive REPL |
 | `src/auth.js` | MSAL PKCE, silent refresh, interactive sign-in, token cache, raw refresh-token grant, `decodeJwt` |
-| `src/client.js` | `CopilotSession` — one WS turn (handshake, `Metrics` frame, frame dispatch, delta folding), the `tone` map, and `toImageAnnotations` (attaches uploaded images to a turn) |
+| `src/client.js` | `CopilotSession` — one WS turn (handshake, `Metrics` frame, frame dispatch, delta folding), the `tone` map, and `toAttachmentAnnotations` (attaches uploads to a turn) |
 | `src/chat-api.js` | history/deletion/upload REST (`GetChats`, `GetConversation`, `DeleteConversation`, `UploadFile`) — injectable `fetchImpl`; image uploads capped at `MAX_IMAGES_PER_MESSAGE` (3) |
 | `src/attachments.js` | attachment planning: `isImage`, `planImageBatches` (≤3 images/message), `renderAttachmentManifest` |
 | `src/graph-upload.js` | document upload to OneDrive `copilotuploads` + `LocalFile` annotations (`spoId`, `toFileAnnotations`) |
 | `src/session-store.js` | persisted default conversation (`session.json`): id/turn-count resolution, load/save |
-| `src/prompt.js` | CLI context/prompt assembly (`--context`, `--new`), no I/O |
+| `src/prompt.js` | CLI context/prompt assembly (`--context`, `--new`, `--temporary`), no I/O |
 | `src/ticket.js` | Freshservice ticket fetch/render + `redactPII` (used by `scripts/ask-ticket.js`); repo-native config (`FRESHSERVICE_*` / `freshservice.json`) — **not** fsvc |
 | `src/index.js` | Public API: `ask()` (one-shot) and `M365Session` (multi-turn, handles auth + reconnect) |
 | `src/log.js` | Optional debug logging (`M365_DEBUG=1` → `~/.config/m365-ask/debug.log`) |
@@ -88,8 +88,10 @@ npx playwright install chromium   # once, only for the interactive sign-in brows
 node cli.js --help
 ```
 
-There is **no unit-test suite** — the protocol is only meaningfully testable
-against the live API. Verify changes end-to-end (below).
+Unit tests cover the pure logic (`npm test`, `node --test`) and the
+self-contained PowerShell script (`npm run test:ps`). The protocol itself is
+only meaningfully testable against the live API — verify changes end-to-end
+(below).
 
 ## Running against real M365
 
@@ -134,7 +136,7 @@ node examples/multiturn.js                           # turn 2 must recall turn 1
   The count is SHARED: 1 image + 2 files fits, 3 images + a file does not — so
   batch them together (`planAttachmentBatches`), never per kind. Both mechanisms
   were captured live with Playwright and verified end to end.
-  See `src/graph-upload.js`, `toImageAnnotations` in `src/client.js`.
+  See `src/graph-upload.js`, `toAttachmentAnnotations` in `src/client.js`.
 - **Corporate TLS inspection** (Zscaler/Netskope/…) makes the WS upgrade fail
   with `self-signed certificate in certificate chain`. Prefer
   `NODE_EXTRA_CA_CERTS=/path/corp-root.pem`; `M365_INSECURE=1` disables

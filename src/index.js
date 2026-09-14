@@ -1,6 +1,6 @@
 // Public API.
 //
-//   import { ask, M365Session } from "m365-ask";
+//   import { ask, M365Session } from "m365-copilot";
 //
 //   const text = await ask("Summarize this: ...");     // one-shot
 //

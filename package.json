@@ -13,7 +13,8 @@
   },
   "scripts": {
     "start": "node cli.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:ps": "pwsh -NoProfile -File scripts/ask-ticket-standalone.tests.ps1"
   },
   "engines": {
     "node": ">=18"

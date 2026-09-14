@@ -156,11 +156,13 @@ src/session-store.js  persisted default conversation (session.json)
 src/prompt.js   CLI context/prompt assembly (--context, --new)
 src/ticket.js   Freshservice ticket fetch/render + PII redaction
 src/log.js      optional debug logging (M365_DEBUG=1)
-scripts/        ask-ticket.js (repo imports) + ask-ticket-standalone.mjs (self-contained)
+scripts/        ask-ticket.js (repo imports), ask-ticket-standalone.mjs + .ps1 (self-contained)
 ```
 
 The ticket scripts redact email addresses and phone numbers from the ticket
-before sending it to Copilot.
+before sending it to Copilot. `ask-ticket-standalone.ps1` (PowerShell 7+) is the
+same tool for machines where Node's TLS check fails against a corporate proxy —
+it uses the OS certificate store, so no `NODE_EXTRA_CA_CERTS` is needed.
 
 This is a trimmed extraction of `m365-copilot-proxy` (same authors' reverse
 engineering); it keeps only the plain-chat path. No tool-calling, agents, or

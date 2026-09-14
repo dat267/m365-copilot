@@ -69,7 +69,7 @@ generation, no automated password/TOTP login.
 | `src/index.js` | Public API: `ask()` (one-shot) and `M365Session` (multi-turn, handles auth + reconnect) |
 | `src/log.js` | Optional debug logging (`M365_DEBUG=1` → `~/.config/m365-ask/debug.log`) |
 | `examples/` | Runnable examples |
-| `scripts/` | `ask-ticket.js` (repo imports) and `ask-ticket-standalone.mjs` (Node built-ins only) |
+| `scripts/` | `ask-ticket.js` (repo imports), `ask-ticket-standalone.mjs` (Node built-ins only), `ask-ticket-standalone.ps1` (PowerShell 7+ twin) |
 
 ESM, `.js`-suffixed relative imports. No TypeScript, no bundler.
 

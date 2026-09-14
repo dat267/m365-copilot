@@ -29,7 +29,9 @@ generation, no automated password/TOTP login.
    (one `conversationId`) is persisted in `session.json` and reused across runs
    — a fresh conversation per prompt is what burns the thread budget; start one
    only explicitly (`{ fresh: true }`, `newConversation()`, `--new`). Space out
-   test runs.
+   test runs. A **temporary** session (`{ temporary: true }`, `--temporary`)
+   sends `disableMemory=1`, is never persisted, and never appears in history —
+   it still spends a conversation, so it is not a way around the budget.
 
 2. **An empty reply is usually NOT a bug and NOT always throttling.**
    - `messageType: "Disengaged"` → the safety filter refused (empty content).
@@ -62,14 +64,17 @@ generation, no automated password/TOTP login.
 |---|---|
 | `cli.js` | CLI: one-shot (`node cli.js "prompt"`) and interactive REPL |
 | `src/auth.js` | MSAL PKCE, silent refresh, interactive sign-in, token cache, raw refresh-token grant, `decodeJwt` |
-| `src/client.js` | `CopilotSession` — one WS turn (handshake, `Metrics` frame, frame dispatch, delta folding), and the `tone` map |
+| `src/client.js` | `CopilotSession` — one WS turn (handshake, `Metrics` frame, frame dispatch, delta folding), the `tone` map, and `toImageAnnotations` (attaches uploaded images to a turn) |
+| `src/chat-api.js` | history/deletion/upload REST (`GetChats`, `GetConversation`, `DeleteConversation`, `UploadFile`) — injectable `fetchImpl`; image uploads capped at `MAX_IMAGES_PER_MESSAGE` (3) |
+| `src/attachments.js` | attachment planning: `isImage`, `planImageBatches` (≤3 images/message), `renderAttachmentManifest` |
+| `src/graph-upload.js` | document upload to OneDrive `copilotuploads` + `LocalFile` annotations (`spoId`, `toFileAnnotations`) |
 | `src/session-store.js` | persisted default conversation (`session.json`): id/turn-count resolution, load/save |
 | `src/prompt.js` | CLI context/prompt assembly (`--context`, `--new`), no I/O |
-| `src/ticket.js` | Freshservice ticket fetch/render + `redactPII` (used by `scripts/ask-ticket.js`) |
+| `src/ticket.js` | Freshservice ticket fetch/render + `redactPII` (used by `scripts/ask-ticket.js`); repo-native config (`FRESHSERVICE_*` / `freshservice.json`) — **not** fsvc |
 | `src/index.js` | Public API: `ask()` (one-shot) and `M365Session` (multi-turn, handles auth + reconnect) |
 | `src/log.js` | Optional debug logging (`M365_DEBUG=1` → `~/.config/m365-ask/debug.log`) |
 | `examples/` | Runnable examples |
-| `scripts/` | `ask-ticket.js` (repo imports), `ask-ticket-standalone.mjs` (Node built-ins only), `ask-ticket-standalone.ps1` (PowerShell 7+ twin) |
+| `scripts/` | `ask-ticket.js` (repo imports), `ask-ticket-standalone.ps1` + `ask-ticket-standalone.tests.ps1` (PowerShell 7+, self-contained; multi-message long-ticket splitting, temporary chat by default, uses the OS cert store) |
 
 ESM, `.js`-suffixed relative imports. No TypeScript, no bundler.
 
@@ -118,6 +123,18 @@ node examples/multiturn.js                           # turn 2 must recall turn 1
 
 ## Gotchas to know before you "fix" something
 
+- **Images and files attach differently, but share one 3-per-message cap.**
+  Images: `POST /m365Copilot/UploadFile` -> `docId`, attached as
+  `messageAnnotationType: "ImageFile"`. Files: uploaded to OneDrive via Graph
+  (`/me/drive/special/copilotuploads` + `createUploadSession` + `PUT`) and
+  attached as `messageAnnotationType: "LocalFile"` with
+  `id = SPO_<base64url(siteId,webId,listId)>_<itemId>`. Attaching needs the
+  annotation on the chat message — uploading alone changes nothing. Files also
+  need a Graph token (`https://graph.microsoft.com/.default`), not the Sydney one.
+  The count is SHARED: 1 image + 2 files fits, 3 images + a file does not — so
+  batch them together (`planAttachmentBatches`), never per kind. Both mechanisms
+  were captured live with Playwright and verified end to end.
+  See `src/graph-upload.js`, `toImageAnnotations` in `src/client.js`.
 - **Corporate TLS inspection** (Zscaler/Netskope/…) makes the WS upgrade fail
   with `self-signed certificate in certificate chain`. Prefer
   `NODE_EXTRA_CA_CERTS=/path/corp-root.pem`; `M365_INSECURE=1` disables

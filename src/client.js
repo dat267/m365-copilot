@@ -12,6 +12,7 @@
 import WebSocket from "ws";
 import { createLogger } from "./log.js";
 import { decodeJwt } from "./auth.js";
+import { toFileAnnotations } from "./graph-upload.js";
 
 const RS = "\x1E";
 const log = createLogger("client");
@@ -107,6 +108,54 @@ const CODE_INTERPRETER_OPTIONS_SETS = [
   "code_interpreter_matplotlib_patching",
 ];
 
+// Required for an attached image OR file to actually be processed. Captured
+// from the web client's own chat invocation when a message carried attachments.
+const ATTACHMENT_OPTIONS_SETS = [
+  "cwc_flux_image",
+  "cwcfluxgptv",
+  "flux_v3_gptv_enable_upload_multi_image_in_turn_wo_ch",
+  "gptvnorm2048",
+  "cwc_fileupload_odb",
+  "add_filestore_filetype",
+];
+
+/**
+ * Splits attachment descriptors into the image annotations (from `UploadFile`,
+ * which carry a `docId`) and the file annotations (from `uploadFileToCopilot`,
+ * which carry drive/item ids).
+ */
+export function toAttachmentAnnotations(attachments = []) {
+  return [...toImageAnnotations(attachments), ...toFileAnnotations(attachments)];
+}
+
+/**
+ * Maps `UploadFile` results to the `messageAnnotations` the web client sends to
+ * attach images to a turn.
+ *
+ * Captured live from copilot.cloud.microsoft (the WS chat invocation):
+ *   messageAnnotations: [{ id: <docId>,
+ *     messageAnnotationMetadata: {"@type":"File", annotationType:"File",
+ *                                fileType:"png", fileName:"x.png"},
+ *     messageAnnotationType: "ImageFile" }]
+ *
+ * Uploading alone does NOT attach anything — the annotation is what makes the
+ * model see the image.
+ */
+export function toImageAnnotations(uploads = []) {
+  return uploads
+    .filter((u) => u && u.docId)
+    .map((u) => ({
+      id: u.docId,
+      messageAnnotationMetadata: {
+        "@type": "File",
+        annotationType: "File",
+        fileType: String(u.fileType ?? "").replace(/^\./, ""),
+        fileName: u.fileName ?? "",
+      },
+      messageAnnotationType: "ImageFile",
+    }));
+}
+
 /**
  * Fold streamed text into the running answer, returning the new answer and the
  * suffix to emit. M365 mixes token deltas with full-text snapshots, and the
@@ -121,17 +170,63 @@ export function foldStreamText(answer, next) {
 }
 
 /**
+ * `isStartOfSession` is true ONLY on the first turn of a conversation we just
+ * created (proxy docs §8). A conversation resumed from a previous run or
+ * switched to via `selectConversation()` must send false.
+ */
+export function isFirstTurnOfNewConversation(turnCount, { resumed = false } = {}) {
+  return turnCount === 0 && !resumed;
+}
+
+/**
+ * Build the ChatHub WebSocket URL. Extracted so URL-level flags (e.g. the
+ * temporary-chat `disableMemory`) are testable without a live socket.
+ */
+export function buildChatUrl({
+  oid,
+  tid,
+  sessionId,
+  conversationId,
+  token,
+  requestId,
+  temporary = false,
+  variants = VARIANTS,
+}) {
+  const params = new URLSearchParams({
+    chatsessionid: requestId,
+    clientrequestid: requestId,
+    "X-SessionId": sessionId,
+    ConversationId: conversationId,
+    // Temporary chat: tells the server to keep no memory of this conversation.
+    ...(temporary ? { disableMemory: "1" } : {}),
+    access_token: token,
+    variants,
+    source: '"officeweb"',
+    product: "Office",
+    agentHost: "Bizchat.FullScreen",
+    licenseType: "Starter",
+    agent: "web",
+    scenario: "OfficeWebIncludedCopilot",
+  });
+  return `wss://substrate.office.com/m365Copilot/Chathub/${oid}@${tid}?${params}`;
+}
+
+/**
  * A persistent M365 Copilot conversation. One WebSocket per turn, but the same
  * sessionId/conversationId are reused so M365 threads the server-side context.
  */
 export class CopilotSession {
-  constructor({ sessionId, conversationId, turnCount = 0 } = {}) {
+  constructor({ sessionId, conversationId, turnCount = 0, resumed = false, temporary = false } = {}) {
     this.sessionId = sessionId ?? crypto.randomUUID();
     this.conversationId = conversationId ?? crypto.randomUUID();
     // Seeded from a persisted conversation so `isStartOfSession` is false on a
     // resumed thread (proxy docs: true only on turn 0).
     this.turnCount = turnCount;
-    log.info(`New session: sid=${this.sessionId}, cid=${this.conversationId}, turn=${turnCount}`);
+    // True when this conversation was NOT created by us (persisted or selected).
+    this.resumed = resumed;
+    // Temporary chat: server keeps no memory of the conversation.
+    this.temporary = temporary;
+    log.info(`New session: sid=${this.sessionId}, cid=${this.conversationId}, turn=${turnCount}, resumed=${resumed}, temporary=${temporary}`);
   }
 
   /**
@@ -139,8 +234,8 @@ export class CopilotSession {
    * @returns {Promise<CopilotStream>} async-iterable of delta strings; also has
    *   getters fullText/hasContent/messageType/contentOrigin/throttle/scores.
    */
-  chat(token, text, model = "m365-copilot", signal) {
-    const isFirst = this.turnCount === 0;
+  chat(token, text, model = "m365-copilot", signal, attachments = []) {
+    const isFirst = isFirstTurnOfNewConversation(this.turnCount, { resumed: this.resumed });
     this.turnCount++;
     log.info(`Chat turn ${this.turnCount - 1}: model=${model}, first=${isFirst}`);
 
@@ -148,21 +243,15 @@ export class CopilotSession {
     const requestId = crypto.randomUUID();
     const sessionId = this.sessionId;
 
-    const params = new URLSearchParams({
-      chatsessionid: requestId,
-      clientrequestid: requestId,
-      "X-SessionId": sessionId,
-      ConversationId: this.conversationId,
-      access_token: token,
-      variants: VARIANTS,
-      source: '"officeweb"',
-      product: "Office",
-      agentHost: "Bizchat.FullScreen",
-      licenseType: "Starter",
-      agent: "web",
-      scenario: "OfficeWebIncludedCopilot",
+    const wsUrl = buildChatUrl({
+      oid: claims.oid,
+      tid: claims.tid,
+      sessionId,
+      conversationId: this.conversationId,
+      token,
+      requestId,
+      temporary: this.temporary,
     });
-    const wsUrl = `wss://substrate.office.com/m365Copilot/Chathub/${claims.oid}@${claims.tid}?${params}`;
 
     return new Promise((resolve, reject) => {
       let answer = "";
@@ -309,6 +398,7 @@ export class CopilotSession {
       });
 
       function sendChat() {
+        const imageAnnotations = toAttachmentAnnotations(attachments);
         const chatMsg = {
           arguments: [{
             source: "officeweb",
@@ -316,6 +406,7 @@ export class CopilotSession {
             sessionId,
             optionsSets: [
               ...(process.env.M365_NO_CODE_INTERPRETER ? [] : CODE_INTERPRETER_OPTIONS_SETS),
+              ...(imageAnnotations.length ? ATTACHMENT_OPTIONS_SETS : []),
             ],
             streamingMode: "ConciseWithPadding",
             spokenTextMode: "None",
@@ -352,6 +443,7 @@ export class CopilotSession {
               experienceType: "Default",
               adaptiveCards: [],
               clientPreferences: {},
+              ...(imageAnnotations.length ? { messageAnnotations: imageAnnotations } : {}),
             },
             plugins: [{ Id: "BingWebSearch", Source: "BuiltIn" }],
             isSbsSupported: true,

@@ -3,31 +3,38 @@
 //
 //   node cli.js "prompt"                    # one-shot
 //   node cli.js --model=claude "prompt"     # pick a tone/model
+//   node cli.js --temporary "prompt"        # temporary chat (no memory, not saved)
 //   node cli.js                             # interactive REPL (one conversation)
 //
-// Feed a large payload (e.g. a ticket export) alongside the instruction:
+// Feed a large payload (e.g. notes or an export) alongside the instruction:
 //
-//   fsvc tickets show 10100 | node cli.js --context - "Draft a customer reply."
-//   node cli.js --context ticket.md "Summarize this in 3 bullets."
+//   cat notes.txt | node cli.js --context - "Draft a customer reply."
+//   node cli.js --context notes.md "Summarize this in 3 bullets."
+//
+// For a Freshservice ticket specifically, use scripts/ask-ticket.js, which
+// fetches the ticket and builds the context itself.
 
 import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { M365Session, ask, getAvailableModels } from "./src/index.js";
 import { parseArgs, loadContext, buildPrompt } from "./src/prompt.js";
 
-const { help, model, context: contextSpec, prompt, fresh } = parseArgs(process.argv.slice(2));
+const { help, model, context: contextSpec, prompt, fresh, temporary } = parseArgs(process.argv.slice(2));
 
 if (help) {
-  console.log(`Usage: m365-copilot [--model=<id>] [--context <file|->] [--new] "prompt"
+  console.log(`Usage: m365-copilot [--model=<id>] [--context <file|->] [--new] [--temporary] "prompt"
 
 Models: ${getAvailableModels().join(", ")}
 
 Options:
   --context <file|->    prepend a file (or stdin with -) to the prompt as data
-                        (use with a data producer, e.g. \`fsvc tickets show 10100 | cli --context -\`)
+                        (use with a data producer, e.g. cat notes.txt | cli --context -)
   --new                 start a new conversation instead of resuming the saved one
                         (conversations are reused across runs by default; opt out
                         entirely with M365_NO_SESSION_PERSIST=1)
+  --temporary           temporary chat: M365 keeps no memory of it and it is not
+                        saved to your chat history (nothing is persisted locally
+                        either). Sets disableMemory=1 on the chat socket.
 
 With no prompt, starts an interactive REPL (single conversation, streamed).
 Env:
@@ -51,12 +58,12 @@ async function readStdin() {
 const context = await loadContext(contextSpec, { readFile, readStdin });
 
 if (prompt) {
-  const text = await ask(buildPrompt(context, prompt), { model, fresh });
+  const text = await ask(buildPrompt(context, prompt), { model, fresh, temporary });
   process.stdout.write(text + "\n");
 } else {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const session = new M365Session({ model, fresh });
-  console.error(`M365 Copilot [model=${model}]. Type a prompt; Ctrl-D to exit.`);
+  const session = new M365Session({ model, fresh, temporary });
+  console.error(`M365 Copilot [model=${model}${temporary ? ", temporary" : ""}]. Type a prompt; Ctrl-D to exit.`);
   if (context) {
     // Load the payload as the first turn so follow-ups share its context.
     const stream = await session.chat(buildPrompt(context, ""), { signal: AbortSignal.timeout(300_000) });

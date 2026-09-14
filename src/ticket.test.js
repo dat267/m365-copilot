@@ -8,6 +8,7 @@ import {
   resolveConfig,
   parseTicketArgs,
   makeFreshserviceGet,
+  normalizeAttachment,
   redactPII,
   TRUNCATION_MARKER,
 } from "./ticket.js";
@@ -26,6 +27,34 @@ test("truncateContext keeps the head and tail under the budget when over", () =>
   assert.ok(out.includes(TRUNCATION_MARKER), "marked the elision");
 });
 
+test("normalizeAttachment reads the Freshservice attachment field names", () => {
+  const a = normalizeAttachment(
+    { id: 7, name: "Issue_Query.png", content_type: "image/png", size: 22065, attachment_url: "https://x/a" },
+    "ticket",
+  );
+
+  assert.deepEqual(a, {
+    name: "Issue_Query.png",
+    contentType: "image/png",
+    size: 22065,
+    url: "https://x/a",
+    source: "ticket",
+  });
+});
+
+test("normalizeAttachment tolerates alternate field spellings", () => {
+  const a = normalizeAttachment(
+    { filename: "trace.log", mime_type: "text/plain", file_size: 900, url: "https://y/b" },
+    "conversation 42",
+  );
+
+  assert.equal(a.name, "trace.log");
+  assert.equal(a.contentType, "text/plain");
+  assert.equal(a.size, 900);
+  assert.equal(a.url, "https://y/b");
+  assert.equal(a.source, "conversation 42");
+});
+
 test("fetchTicket fetches the ticket and its conversations", async () => {
   const calls = [];
   const get = async (path, query) => {
@@ -39,12 +68,51 @@ test("fetchTicket fetches the ticket and its conversations", async () => {
   assert.deepEqual(out, {
     ticket: { id: 10100, subject: "Printer" },
     conversations: [{ id: 1, body_text: "hi" }],
+    attachments: [],
   });
   assert.equal(calls[0].path, "tickets/10100");
   assert.deepEqual(calls[1], {
     path: "tickets/10100/conversations",
     query: { per_page: "100", order_by: "created_at", order_type: "asc", page: "1" },
   });
+});
+
+test("fetchTicket collects attachments from the ticket, conversations and linked attachments", async () => {
+  const get = async (path) => {
+    if (path === "tickets/10100") {
+      return { ticket: { id: 10100, attachments: [{ name: "a.png", content_type: "image/png" }], cloud_files: [] } };
+    }
+    if (path === "tickets/10100/linked-attachments") {
+      return { attachments: [{ name: "c.pdf", content_type: "application/pdf" }], meta: { count: 1 } };
+    }
+    return {
+      conversations: [{ id: 5, attachments: [{ name: "b.log", content_type: "text/plain" }] }],
+      meta: { has_next: false },
+    };
+  };
+
+  const out = await fetchTicket(10100, get);
+
+  assert.deepEqual(
+    out.attachments.map((a) => [a.name, a.source]),
+    [
+      ["a.png", "ticket"],
+      ["b.log", "conversation 5"],
+      ["c.pdf", "linked"],
+    ],
+  );
+});
+
+test("fetchTicket still works when linked attachments are unavailable", async () => {
+  const get = async (path) => {
+    if (path === "tickets/10100") return { ticket: { id: 10100 } };
+    if (path.endsWith("linked-attachments")) throw new Error("Freshservice 404 Not Found");
+    return { conversations: [], meta: { has_next: false } };
+  };
+
+  const out = await fetchTicket(10100, get);
+
+  assert.deepEqual(out.attachments, []);
 });
 
 test("fetchTicket follows meta.has_next across conversation pages", async () => {
@@ -106,9 +174,25 @@ test("renderTicket renders metadata, description and conversation trace", () => 
   assert.ok(md.indexOf("2026-08-01T10:30:00Z") < md.indexOf("2026-08-01T11:00:00Z"), "oldest first");
 });
 
+test("renderTicket appends the attachment manifest", () => {
+  const md = renderTicket({ id: 1, subject: "Printer" }, [], {
+    attachments: [
+      { name: "Issue_Query.png", contentType: "image/png", size: 22065, source: "ticket", url: "https://x/a" },
+    ],
+  });
+
+  assert.match(md, /## Attachments/);
+  assert.match(md, /Issue_Query\.png/);
+  assert.ok(md.indexOf("## Conversations") < md.indexOf("## Attachments"), "manifest comes after the trace");
+});
+
+test("renderTicket notes the absence of attachments", () => {
+  assert.match(renderTicket({ id: 1, subject: "s" }, []), /## Attachments\n\n\(none\)/);
+});
+
 test("resolveConfig builds the base URL from env subdomain and session", () => {
-  const env = { FSVC_SUBDOMAIN: "acme", FSVC_ITILDESK_SESSION: "sess" };
-  const io = { defaultPath: "/home/u/.config/fsvc/fsvc.json", exists: () => false, readFile: () => "" };
+  const env = { FRESHSERVICE_SUBDOMAIN: "acme", FRESHSERVICE_SESSION: "sess" };
+  const io = { defaultPath: "/home/u/.config/m365-ask/freshservice.json", exists: () => false, readFile: () => "" };
 
   assert.deepEqual(resolveConfig(env, io), {
     baseUrl: "https://acme.freshservice.com",
@@ -116,12 +200,12 @@ test("resolveConfig builds the base URL from env subdomain and session", () => {
   });
 });
 
-test("resolveConfig falls back to the config file named by FSVC_CONFIG_FILE", () => {
-  const env = { FSVC_CONFIG_FILE: "/tmp/fsvc.json" };
+test("resolveConfig falls back to the config file named by M365_FRESHSERVICE_CONFIG", () => {
+  const env = { M365_FRESHSERVICE_CONFIG: "/tmp/freshservice.json" };
   const io = {
-    defaultPath: "/home/u/.config/fsvc/fsvc.json",
-    exists: (p) => p === "/tmp/fsvc.json",
-    readFile: () => JSON.stringify({ subdomain: "fileco", "itildesk-session": "filesess" }),
+    defaultPath: "/home/u/.config/m365-ask/freshservice.json",
+    exists: (p) => p === "/tmp/freshservice.json",
+    readFile: () => JSON.stringify({ subdomain: "fileco", session: "filesess" }),
   };
 
   assert.deepEqual(resolveConfig(env, io), {
@@ -130,58 +214,86 @@ test("resolveConfig falls back to the config file named by FSVC_CONFIG_FILE", ()
   });
 });
 
-test("resolveConfig uses base-url and trims a trailing slash", () => {
-  const env = { FSVC_SUBDOMAIN: "acme", FSVC_ITILDESK_SESSION: "s", FSVC_BASE_URL: "https://mock.local/" };
+test("resolveConfig lets env override the config file", () => {
+  const env = { FRESHSERVICE_SESSION: "envsess", M365_FRESHSERVICE_CONFIG: "/tmp/freshservice.json" };
+  const io = {
+    defaultPath: "/nope",
+    exists: (p) => p === "/tmp/freshservice.json",
+    readFile: () => JSON.stringify({ subdomain: "fileco", session: "filesess" }),
+  };
+
+  assert.deepEqual(resolveConfig(env, io), {
+    baseUrl: "https://fileco.freshservice.com",
+    session: "envsess",
+  });
+});
+
+test("resolveConfig uses baseUrl and trims a trailing slash", () => {
+  const env = {
+    FRESHSERVICE_SUBDOMAIN: "acme",
+    FRESHSERVICE_SESSION: "s",
+    FRESHSERVICE_BASE_URL: "https://mock.local/",
+  };
   const io = { defaultPath: "/nope", exists: () => false, readFile: () => "" };
 
   assert.equal(resolveConfig(env, io).baseUrl, "https://mock.local");
 });
 
 test("resolveConfig reads the default config path when there is no override", () => {
-  const env = {};
   const io = {
-    defaultPath: "/home/u/.config/fsvc/fsvc.json",
-    exists: (p) => p === "/home/u/.config/fsvc/fsvc.json",
-    readFile: () => JSON.stringify({ subdomain: "homeco", "itildesk-session": "homesess" }),
+    defaultPath: "/home/u/.config/m365-ask/freshservice.json",
+    exists: (p) => p === "/home/u/.config/m365-ask/freshservice.json",
+    readFile: () => JSON.stringify({ subdomain: "homeco", session: "homesess" }),
   };
 
-  assert.deepEqual(resolveConfig(env, io), {
+  assert.deepEqual(resolveConfig({}, io), {
     baseUrl: "https://homeco.freshservice.com",
     session: "homesess",
   });
 });
 
-test("resolveConfig prefers a local fsvc.json over the default path", () => {
-  const env = {};
+test("resolveConfig prefers a local freshservice.json over the default path", () => {
   const io = {
-    defaultPath: "/home/u/.config/fsvc/fsvc.json",
-    exists: (p) => p === "fsvc.json" || p === "/home/u/.config/fsvc/fsvc.json",
+    defaultPath: "/home/u/.config/m365-ask/freshservice.json",
+    exists: (p) => p === "freshservice.json" || p === "/home/u/.config/m365-ask/freshservice.json",
     readFile: (p) =>
       JSON.stringify(
-        p === "fsvc.json"
-          ? { subdomain: "localco", "itildesk-session": "localsess" }
-          : { subdomain: "homeco", "itildesk-session": "homesess" },
+        p === "freshservice.json"
+          ? { subdomain: "localco", session: "localsess" }
+          : { subdomain: "homeco", session: "homesess" },
       ),
   };
 
-  assert.deepEqual(resolveConfig(env, io), {
+  assert.deepEqual(resolveConfig({}, io), {
     baseUrl: "https://localco.freshservice.com",
     session: "localsess",
   });
 });
 
 test("resolveConfig throws when no session is configured", () => {
-  const env = { FSVC_SUBDOMAIN: "acme" };
+  const env = { FRESHSERVICE_SUBDOMAIN: "acme" };
   const io = { defaultPath: "/nope", exists: () => false, readFile: () => "" };
 
   assert.throws(() => resolveConfig(env, io), /session/i);
 });
 
 test("resolveConfig throws when no base URL can be determined", () => {
-  const env = { FSVC_ITILDESK_SESSION: "sess" };
+  const env = { FRESHSERVICE_SESSION: "sess" };
   const io = { defaultPath: "/nope", exists: () => false, readFile: () => "" };
 
   assert.throws(() => resolveConfig(env, io), /subdomain|base.?url/i);
+});
+
+test("resolveConfig does not read the fsvc config", () => {
+  const io = {
+    defaultPath: "/home/u/.config/m365-ask/freshservice.json",
+    exists: () => false,
+    readFile: () => {
+      throw new Error("should not read any config file");
+    },
+  };
+
+  assert.throws(() => resolveConfig({}, io), /subdomain|base.?url/i);
 });
 
 test("parseTicketArgs parses the id, instruction and default maxChars", () => {
@@ -248,4 +360,13 @@ test("redactPII replaces phone numbers in common formats", () => {
 test("redactPII leaves dates, ticket ids and references alone", () => {
   const text = "Created 2026-08-01T10:30:00Z, ticket #10100, ref INC0012345";
   assert.equal(redactPII(text), text);
+});
+
+test("redactPII leaves long numeric ids and attachment URLs intact", () => {
+  const url =
+    "https://acme.attachments.freshservice.com/data/helpdesk/attachments/production/21117119076/original/a.jpeg" +
+    "?response-content-type=image/jpeg&Expires=1789502963&Signature=abc123";
+
+  assert.equal(redactPII(url), url, "a signed attachment URL must survive intact");
+  assert.equal(redactPII("Requester  : 21003608052"), "Requester  : 21003608052");
 });

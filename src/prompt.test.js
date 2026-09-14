@@ -23,12 +23,17 @@ test("parseArgs reads --context <file> and keeps the instruction as the prompt",
     model: "m365-copilot",
     context: "ticket.md",
     fresh: false,
+    temporary: false,
     prompt: "draft a reply",
   });
 });
 
 test("parseArgs honours --new", () => {
   assert.equal(parseArgs(["--new", "hi"]).fresh, true);
+});
+
+test("parseArgs honours --temporary", () => {
+  assert.equal(parseArgs(["--temporary", "hi"]).temporary, true);
 });
 
 test("parseArgs accepts the --context=<file> form", () => {

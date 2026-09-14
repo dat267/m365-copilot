@@ -8,16 +8,64 @@
 #   ask-ticket-standalone.ps1 "<prompt>" <ticket-id>
 #
 #   ask-ticket-standalone.ps1 "Draft a concise customer reply." 10100
-#   ask-ticket-standalone.ps1 "List the action items and owners." 10100
+#   ask-ticket-standalone.ps1 "List action items and owners." 21491
+#   ask-ticket-standalone.ps1 -Plan "x" 24613            # show the split, spend 0 turns
+#   ask-ticket-standalone.ps1 -LastConversation "..." 24613
+#   ask-ticket-standalone.ps1 -ConversationId <guid> "..." 24613
+#   ask-ticket-standalone.ps1 -Persist "..." 24613        # long-term memory ON
+#
+# CONVERSATION MODE — TEMPORARY BY DEFAULT. Every ChatHub URL carries
+# `disableMemory=1`, so the server keeps no long-term memory and the chat never
+# appears in your history. Use -Persist to turn memory back on.
+#
+#   (default)         new conversation id, temporary
+#   -ConversationId   talk to that specific conversation
+#   -LastConversation reuse the id remembered from the previous run
+#                     (<M365_CONFIG_DIR|~/.config/m365-ask>/last-ticket-conversation.json)
+#
+# The id used is always recorded, so -LastConversation works next time. Note
+# that resuming is only meaningful for a conversation that was NOT temporary.
 #
 # Requires PowerShell 7+ (pwsh). Credentials are hard-coded in $Config below (or
 # overridden with env vars). The model is always M365 "auto"; set
 # $Config.SystemPrompt to steer the response, $Config.Redact to strip PII.
+#
+# LONG TICKETS — this script does NOT truncate the ticket. It renders the ticket
+# as ordered SECTIONS, packs them into as many messages as the per-message text
+# budget allows, and sends them as successive turns of ONE M365 conversation, so
+# the model holds the whole ticket by the time it answers. Limits that drive the
+# split (all in $Config):
+#
+#   MaxTextChars            text budget per message  (message text limit)
+#   MaxMessages             safety cap on turns
+#   MaxInlineFileBytes      don't inline attachments bigger than this  (size limit)
+#   MaxFileChars            per-attachment inline budget
+#   MaxInlineFiles          how many attachments to inline at all  (count limit)
+#   MaxAttachmentsPerMessage  images + files per message (shared cap)
+#   MaxImageDimension       image edge cap, used to flag oversized images
+#   MaxImageBytes           image size cap
+#
+# There is no separate "max images" knob: how many images can be delivered is
+# derived from MaxMessages, because every image batch is also a turn.
+#
+# ATTACHMENT REALITY CHECK: uploading a file via /m365Copilot/UploadFile is NOT
+# enough — the model will say "I can't see any uploaded image". To attach an image
+# the chat message must carry `messageAnnotations` (id = the uploaded docId,
+# messageAnnotationType "ImageFile") plus the image optionsSets. Both are sent by
+# this script for the images it uploads. Verified live. Text-bearing attachments
+# (logs, csv, json, …) are separately inlined into the prompt.
 
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)][string]$Prompt = "",
-    [Parameter(Position = 1)][int]$TicketId = 0
+    [Parameter(Position = 1)][int]$TicketId = 0,
+    [switch]$Plan,
+    # Talk to a specific existing M365 conversation instead of starting a new one.
+    [string]$ConversationId = "",
+    # Reuse the conversation id this script used last time (remembered on disk).
+    [switch]$LastConversation,
+    # Long-term memory ON. The default is temporary chat (disableMemory=1).
+    [switch]$Persist
 )
 
 # ===========================================================================
@@ -38,10 +86,63 @@ $Config = [ordered]@{
     AccessToken   = ""
     ClientId      = "c0ab8ce9-e9a0-42e7-b064-33d422df41f1"
 
-    MaxChars      = 60000
+    # --- limits that drive the multi-message split --------------------------
+    MaxTextChars    = 60000     # per-message text budget
+    MaxMessages     = 60        # safety cap on turns per run
+    MaxInlineFiles  = 20        # attachment count limit (how many to inline)
+    MaxInlineFileBytes = 262144 # attachment size limit (256 KB) for inlining
+    MaxFileChars    = 20000     # per-attachment inline budget
+    # M365 caps images AND files TOGETHER at 3 per message (verified live), so
+    # this is one shared count, not two.
+    MaxAttachmentsPerMessage = 3
+    MaxImageDimension   = 2048  # image resolution limit (longest edge, px)
+    MaxImageBytes       = 4194304 # image size limit (4 MB)
+
+    # Text-bearing extensions that are worth inlining verbatim.
+    InlineTextExtensions = @(
+        ".txt", ".log", ".csv", ".tsv", ".json", ".jsonl", ".ndjson", ".md", ".markdown",
+        ".html", ".htm", ".xml", ".yaml", ".yml", ".ini", ".cfg", ".conf", ".properties",
+        ".sql", ".srt", ".vtt", ".eml", ".diff", ".patch", ".sh", ".ps1", ".bat", ".cmd"
+    )
+
     Redact        = $true
     SystemPrompt  = ""    # e.g. "You are a concise IT support assistant. Do not invent facts."
+
+    # --- conversation mode --------------------------------------------------
+    # TEMPORARY CHAT BY DEFAULT: every ChatHub URL carries disableMemory=1, so
+    # the server keeps no long-term memory of the conversation and it never
+    # appears in your chat history. Pass -Persist to turn memory back on.
+    Temporary     = $true
+    # Where -LastConversation remembers the previous conversation id.
+    # Default: <M365_CONFIG_DIR | ~/.config/m365-ask>/last-ticket-conversation.json
+    StateFile     = ""
 }
+
+# Env overrides — so the script can be run without editing it (and so the limits
+# can be tuned per ticket). Freshservice names match the repo's Node side.
+foreach ($pair in @(
+        @("FRESHSERVICE_SUBDOMAIN", "Subdomain"), @("FRESHSERVICE_SESSION", "SessionCookie"),
+        @("FRESHSERVICE_BASE_URL", "BaseUrl"), @("M365_CLIENT_ID", "ClientId"),
+        @("M365_TICKET_SYSTEM_PROMPT", "SystemPrompt")
+    )) {
+    $value = [Environment]::GetEnvironmentVariable($pair[0])
+    if (-not [string]::IsNullOrEmpty($value)) { $Config[$pair[1]] = $value }
+}
+foreach ($pair in @(
+        @("M365_TICKET_MAX_TEXT_CHARS", "MaxTextChars"), @("M365_TICKET_MAX_MESSAGES", "MaxMessages"),
+        @("M365_TICKET_MAX_INLINE_FILES", "MaxInlineFiles"),
+        @("M365_TICKET_MAX_INLINE_FILE_BYTES", "MaxInlineFileBytes"),
+        @("M365_TICKET_MAX_FILE_CHARS", "MaxFileChars"),
+        @("M365_TICKET_MAX_ATTACHMENTS_PER_MESSAGE", "MaxAttachmentsPerMessage"),
+        @("M365_TICKET_MAX_IMAGE_DIMENSION", "MaxImageDimension"),
+        @("M365_TICKET_MAX_IMAGE_BYTES", "MaxImageBytes")
+    )) {
+    $value = [Environment]::GetEnvironmentVariable($pair[0])
+    if (-not [string]::IsNullOrEmpty($value)) { $Config[$pair[1]] = [int]$value }
+}
+if ($env:M365_TICKET_REDACT) { $Config.Redact = ($env:M365_TICKET_REDACT -eq "1") }
+if ($env:M365_TICKET_TEMPORARY) { $Config.Temporary = ($env:M365_TICKET_TEMPORARY -eq "1") }
+if ($env:M365_TICKET_STATE_FILE) { $Config.StateFile = $env:M365_TICKET_STATE_FILE }
 
 # ===========================================================================
 # Constants
@@ -78,6 +179,12 @@ $CodeInterpreter = @(
     "cwc_code_interpreter", "cwc_code_interpreter_amsfix", "cwc_code_interpreter_citation_fix",
     "code_interpreter_interactive_charts", "code_interpreter_matplotlib_patching"
 )
+# Required for M365 to actually process an attached image. Captured from the web
+# client's own chat invocation when a message carried an image.
+$ImageOptionsSets = @(
+    "cwc_flux_image", "cwcfluxgptv", "flux_v3_gptv_enable_upload_multi_image_in_turn_wo_ch",
+    "gptvnorm2048", "cwc_fileupload_odb", "add_filestore_filetype"
+)
 $StatusNames = @{ 2 = "Open"; 3 = "Pending"; 4 = "Resolved"; 5 = "Closed" }
 $PriorityNames = @{ 1 = "Low"; 2 = "Medium"; 3 = "High"; 4 = "Urgent" }
 $UrgencyImpactNames = @{ 1 = "Low"; 2 = "Medium"; 3 = "High" }
@@ -96,6 +203,10 @@ $MetaFields = @(
     @{ Label = "Department"; Key = "department_id"; NameKey = "department_name" },
     @{ Label = "Created"; Key = "created_at"; NameKey = "" },
     @{ Label = "Updated"; Key = "updated_at"; NameKey = "" }
+)
+$ImageExtensions = @(
+    ".png", ".jpg", ".jpeg", ".jfif", ".pjpeg", ".pjp", ".gif", ".bmp", ".webp",
+    ".tif", ".tiff", ".heic", ".heif", ".svg"
 )
 
 # ===========================================================================
@@ -148,6 +259,208 @@ function Get-ConversationAuthor {
     return Get-FieldValue -Object $Conversation -Key "user_id"
 }
 
+function Get-Extension {
+    param([AllowNull()][string]$Name)
+    if ([string]::IsNullOrEmpty($Name)) { return "" }
+    $dot = $Name.LastIndexOf(".")
+    if ($dot -le 0 -or $dot -eq $Name.Length - 1) { return "" }
+    return $Name.Substring($dot).ToLowerInvariant()
+}
+
+# ===========================================================================
+# Attachments: normalise, classify, manifest
+# ===========================================================================
+# Freshservice attachment shape (confirmed live):
+#   { id, name, content_type, size, attachment_url, canonical_url, uploaded_by, ... }
+function ConvertTo-NormalizedAttachment {
+    param($Raw, [string]$Source)
+    if ($null -eq $Raw) { return $null }
+    $name = Get-FieldValue -Object $Raw -Key "name"
+    if (-not $name) { $name = Get-FieldValue -Object $Raw -Key "filename" }
+    $type = Get-FieldValue -Object $Raw -Key "content_type"
+    $sizeRaw = Get-FieldRaw -Object $Raw -Key "size"
+    $url = Get-FieldValue -Object $Raw -Key "attachment_url"
+    if (-not $url) { $url = Get-FieldValue -Object $Raw -Key "url" }
+    $ext = Get-Extension -Name $name
+    return [pscustomobject]@{
+        Name        = $name
+        ContentType = $type
+        Size        = if ($null -ne $sizeRaw) { [long]$sizeRaw } else { 0 }
+        Url         = $url
+        Source      = $Source
+        Extension   = $ext
+        IsImage     = (($type -like "image/*") -or ($ImageExtensions -contains $ext))
+    }
+}
+
+function Get-TicketAttachments {
+    param($Ticket, $Conversations, $Linked)
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($a in @($Ticket.attachments)) {
+        if ($a) { $out.Add((ConvertTo-NormalizedAttachment -Raw $a -Source "ticket")) }
+    }
+    foreach ($a in @($Ticket.cloud_files)) {
+        if ($a) { $out.Add((ConvertTo-NormalizedAttachment -Raw $a -Source "ticket (cloud)")) }
+    }
+    foreach ($c in @($Conversations)) {
+        $id = Get-FieldValue -Object $c -Key "id"
+        foreach ($a in @($c.attachments)) {
+            if ($a) { $out.Add((ConvertTo-NormalizedAttachment -Raw $a -Source "conversation $id")) }
+        }
+    }
+    foreach ($a in @($Linked)) {
+        if ($a) { $out.Add((ConvertTo-NormalizedAttachment -Raw $a -Source "linked")) }
+    }
+    return $out.ToArray()
+}
+
+# Splits attachments into what can be inlined (text-ish, small enough) vs not.
+function Get-AttachmentPlan {
+    param(
+        $Attachments,
+        [int]$MaxInlineFileBytes = 262144,
+        [int]$MaxInlineFiles = 20,
+        [string[]]$TextExtensions = @(".txt", ".log")
+    )
+    $inline = [System.Collections.Generic.List[object]]::new()
+    $listed = [System.Collections.Generic.List[object]]::new()
+    $images = [System.Collections.Generic.List[object]]::new()
+    foreach ($a in @($Attachments)) {
+        if ($null -eq $a) { continue }
+        if ($a.IsImage) { $images.Add($a); $listed.Add($a); continue }
+        $isTextish = ($a.ContentType -like "text/*") -or ($a.ContentType -like "*json*") -or
+                     ($a.ContentType -like "*xml*") -or ($TextExtensions -contains $a.Extension)
+        if ($isTextish -and $a.Size -le $MaxInlineFileBytes -and $inline.Count -lt $MaxInlineFiles) {
+            $inline.Add($a)
+        } else {
+            $listed.Add($a)
+        }
+    }
+    return [pscustomobject]@{
+        Inline     = $inline.ToArray()
+        ListedOnly = $listed.ToArray()
+        Images     = $images.ToArray()
+        ImageCount = $images.Count
+    }
+}
+
+function Format-AttachmentManifest {
+    param($Attachments)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("## Attachments")
+    $lines.Add("")
+    $list = @($Attachments)
+    if ($list.Count -eq 0) {
+        $lines.Add("(none)")
+        return ($lines -join "`n")
+    }
+    $lines.Add("| # | Name | Type | Size (bytes) | Source | URL |")
+    $lines.Add("|---|---|---|---|---|---|")
+    $i = 0
+    foreach ($a in $list) {
+        $i++
+        $cells = @(
+            "$i", $a.Name, $a.ContentType, "$($a.Size)", $a.Source, $a.Url
+        ) | ForEach-Object { ([string]$_).Replace("|", "\|") }
+        $lines.Add("| " + ($cells -join " | ") + " |")
+    }
+    return ($lines -join "`n")
+}
+
+# How many images can be uploaded before the turn budget (MaxMessages) runs out.
+# Context turns and image turns both count against MaxMessages, and the final
+# turn always carries the last image batch — so there is no separate "max
+# images" knob. Pure so it can be unit tested.
+function Get-ImageBudget {
+    param(
+        [int]$MaxMessages = 60,
+        [int]$ContextTurns = 1,
+        [int]$MaxPerMessage = 3,
+        [int]$ImageCount = 0
+    )
+    if ($MaxMessages -lt 1 -or $ContextTurns -gt $MaxMessages) {
+        return [pscustomobject]@{ Allowed = 0; Budget = 0; Capped = ($ImageCount -gt 0) }
+    }
+    $extraTurns = $MaxMessages - $ContextTurns
+    $budget = ($extraTurns + 1) * $MaxPerMessage
+    $allowed = [math]::Min($ImageCount, $budget)
+    return [pscustomobject]@{
+        Allowed = $allowed
+        Budget  = $budget
+        Capped  = ($allowed -lt $ImageCount)
+    }
+}
+
+# One 16-byte GUID from a `b!` drive id (mixed-endian, .NET GUID order).
+function Get-GuidFromDriveBytes {
+    param([byte[]]$Bytes, [int]$Offset)
+    $hex = { param($i, $n) (($Bytes[$i..($i + $n - 1)] | ForEach-Object { $_.ToString("x2") }) -join "") }
+    $rev = { param($i, $n) (($Bytes[($i + $n - 1)..$i] | ForEach-Object { $_.ToString("x2") }) -join "") }
+    return "$(& $rev $Offset 4)-$(& $rev ($Offset + 4) 2)-$(& $rev ($Offset + 6) 2)-$(& $hex ($Offset + 8) 2)-$(& $hex ($Offset + 10) 6)"
+}
+
+# The `id` the web client puts on a LocalFile annotation:
+#   SPO_ + base64url("<siteId>,<webId>,<listId>") + "_" + driveItemId
+function Get-SpoId {
+    param([string]$DriveId, [string]$ItemId)
+    $b64 = $DriveId -replace '^b!', ''
+    $b64 = $b64.Replace('-', '+').Replace('_', '/')
+    switch ($b64.Length % 4) { 2 { $b64 += '==' } 3 { $b64 += '=' } }
+    $bytes = [Convert]::FromBase64String($b64)
+    if ($bytes.Length -lt 48) { throw "unexpected driveId: $DriveId" }
+    $guids = @(0, 16, 32 | ForEach-Object { Get-GuidFromDriveBytes -Bytes $bytes -Offset $_ })
+    $joined = $guids -join ','
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($joined)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    return "SPO_${encoded}_$ItemId"
+}
+
+# Maps uploaded drive items to the `messageAnnotations` entries for FILES.
+# Captured shape: { id: SPO_..., text: <name>, url: <webUrl>,
+#                   messageAnnotationType: "LocalFile" }
+function New-FileAnnotations {
+    param($Uploads = @())
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($u in @($Uploads)) {
+        if ($null -eq $u) { continue }
+        $itemId = Get-FieldValue -Object $u -Key "itemId"
+        $driveId = Get-FieldValue -Object $u -Key "driveId"
+        if (-not $itemId -or -not $driveId) { continue }
+        $out.Add([ordered]@{
+            id = (Get-SpoId -DriveId $driveId -ItemId $itemId)
+            text = (Get-FieldValue -Object $u -Key "fileName")
+            url = (Get-FieldValue -Object $u -Key "webUrl")
+            messageAnnotationType = "LocalFile"
+        })
+    }
+    return $out.ToArray()
+}
+
+# Maps UploadFile results to the `messageAnnotations` the web client sends to
+# attach images to a turn. Captured live from copilot.cloud.microsoft:
+#   { id: <docId>, messageAnnotationMetadata: {"@type":"File",
+#     annotationType:"File", fileType:"png", fileName:"x.png"},
+#     messageAnnotationType: "ImageFile" }
+# Uploading alone does NOT attach anything — this is what makes the model see it.
+function New-ImageAnnotations {
+    param($Uploads = @())
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($u in @($Uploads)) {
+        if ($null -eq $u) { continue }
+        $docId = Get-FieldValue -Object $u -Key "docId"
+        if (-not $docId) { continue }
+        $fileType = (Get-FieldValue -Object $u -Key "fileType").TrimStart(".")
+        $out.Add([ordered]@{
+            id = $docId
+            messageAnnotationMetadata = [ordered]@{
+                "@type" = "File"; annotationType = "File"
+                fileType = $fileType; fileName = (Get-FieldValue -Object $u -Key "fileName")
+            }
+            messageAnnotationType = "ImageFile"
+        })
+    }
+    return $out.ToArray()
+}
+
 # ===========================================================================
 # Freshservice private API + ticket rendering
 # ===========================================================================
@@ -183,43 +496,170 @@ function Get-TicketData {
         $hasNext = $resp.meta -and $resp.meta.has_next
         $page++
     } while ($hasNext -and $page -le 1000)
-    return @{ Ticket = $ticketResp.ticket; Conversations = $conversations }
+
+    # linked-attachments is optional; an older build/plan may 404 it.
+    $linked = @()
+    try { $linked = @((Invoke-FSGet -Path "tickets/$Id/linked-attachments").attachments) } catch { }
+
+    $attachments = Get-TicketAttachments -Ticket $ticketResp.ticket -Conversations $conversations -Linked $linked
+    return @{
+        Ticket        = $ticketResp.ticket
+        Conversations = $conversations
+        Attachments   = $attachments
+    }
 }
 
-function Format-TicketContents {
-    param($Ticket, $Conversations)
-    $lines = [System.Collections.Generic.List[string]]::new()
+# Ordered context sections. Returned as an ARRAY so the packer can split on them.
+function Format-TicketSections {
+    param($Ticket, $Conversations, $Attachments)
+
+    $head = [System.Collections.Generic.List[string]]::new()
     $display = Get-FieldValue -Object $Ticket -Key "display_id"
     if (-not $display) { $display = Get-FieldValue -Object $Ticket -Key "id" }
-    $lines.Add("# Ticket #$display — $(Get-FieldValue -Object $Ticket -Key 'subject')")
-    $lines.Add("")
+    $head.Add("# Ticket #$display — $(Get-FieldValue -Object $Ticket -Key 'subject')")
+    $head.Add("")
 
     $width = ($MetaFields | ForEach-Object { $_.Label.Length } | Measure-Object -Maximum).Maximum
     foreach ($f in $MetaFields) {
         $raw = Get-FieldValue -Object $Ticket -Key $f.NameKey
         if (-not $raw) { $raw = Get-FieldValue -Object $Ticket -Key $f.Key }
         $val = Get-MappedName -Key $f.Key -Value $raw
-        $lines.Add(("{0} : {1}" -f $f.Label.PadRight($width), $val))
+        $head.Add(("{0} : {1}" -f $f.Label.PadRight($width), $val))
     }
-    $lines.Add("")
+    $head.Add("")
 
     $desc = ConvertTo-PlainText (Get-FieldValue -Object $Ticket -Key "description_text")
     if (-not $desc) { $desc = ConvertTo-PlainText (Get-FieldValue -Object $Ticket -Key "description") }
-    if ($desc) { $lines.Add($desc); $lines.Add("") }
+    if ($desc) { $head.Add($desc) }
+    $head.Add("")
 
-    $lines.Add("## Conversations")
-    $lines.Add("")
+    $sections = [System.Collections.Generic.List[string]]::new()
+    $sections.Add(($head -join "`n"))
+    $sections.Add((Format-AttachmentManifest -Attachments $Attachments))
+
+    $sections.Add("## Conversations")
     $convs = @($Conversations)
-    if ($convs.Count -eq 0) { $lines.Add("(none)") }
-    foreach ($c in $convs) {
-        $dir = if ((Get-FieldRaw -Object $c -Key "incoming") -eq $true) { "incoming" } else { "outgoing" }
-        $body = ConvertTo-PlainText (Get-FieldValue -Object $c -Key "body_text")
-        if (-not $body) { $body = ConvertTo-PlainText (Get-FieldValue -Object $c -Key "body") }
-        $lines.Add("### $(Get-ConversationAuthor -Conversation $c) ($dir, $(Get-FieldValue -Object $c -Key 'created_at'))")
-        $lines.Add($(if ($body) { $body } else { "(no body)" }))
-        $lines.Add("")
+    if ($convs.Count -eq 0) {
+        $sections.Add("(none)")
+    } else {
+        foreach ($c in $convs) {
+            $dir = if ((Get-FieldRaw -Object $c -Key "incoming") -eq $true) { "incoming" } else { "outgoing" }
+            $body = ConvertTo-PlainText (Get-FieldValue -Object $c -Key "body_text")
+            if (-not $body) { $body = ConvertTo-PlainText (Get-FieldValue -Object $c -Key "body") }
+            $block = "### $(Get-ConversationAuthor -Conversation $c) ($dir, $(Get-FieldValue -Object $c -Key 'created_at'))`n" +
+                     $(if ($body) { $body } else { "(no body)" })
+            $sections.Add($block)
+        }
     }
-    return ($lines -join "`n")
+    return $sections.ToArray()
+}
+
+# Back-compat single-string render (used by tests / other callers).
+function Format-TicketContents {
+    param($Ticket, $Conversations, $Attachments = @(), [int]$MaxTextChars = 0)
+    $sections = Format-TicketSections -Ticket $Ticket -Conversations $Conversations -Attachments $Attachments
+    $md = ($sections -join "`n`n")
+    if ($MaxTextChars -gt 0 -and $md.Length -gt $MaxTextChars) { return Limit-Text -Text $md -MaxChars $MaxTextChars }
+    return $md
+}
+
+# ===========================================================================
+# Message packing: split the context across as many messages as needed
+# ===========================================================================
+# Splits one oversized block on line boundaries, then hard on characters.
+function Split-TextIntoChunks {
+    param([string]$Text, [int]$MaxChars)
+    $chunks = [System.Collections.Generic.List[string]]::new()
+    if ($MaxChars -le 0) { $MaxChars = 1 }
+    $current = [System.Text.StringBuilder]::new()
+    foreach ($line in ($Text -split "`n")) {
+        $piece = $line + "`n"
+        if ($piece.Length -gt $MaxChars) {
+            # flush, then hard-split this very long line
+            if ($current.Length -gt 0) { $chunks.Add($current.ToString().TrimEnd("`n")); $current.Clear() | Out-Null }
+            $rest = $line
+            while ($rest.Length -gt $MaxChars) {
+                $chunks.Add($rest.Substring(0, $MaxChars))
+                $rest = $rest.Substring($MaxChars)
+            }
+            if ($rest.Length -gt 0) { $current.Append($rest + "`n") | Out-Null }
+            continue
+        }
+        if ($current.Length + $piece.Length -gt $MaxChars) {
+            $chunks.Add($current.ToString().TrimEnd("`n"))
+            $current.Clear() | Out-Null
+        }
+        $current.Append($piece) | Out-Null
+    }
+    if ($current.Length -gt 0) { $chunks.Add($current.ToString().TrimEnd("`n")) }
+    if ($chunks.Count -eq 0) { $chunks.Add("") }
+    return $chunks.ToArray()
+}
+
+# Packs sections greedily into messages that each fit MaxChars. Oversized
+# sections are split; nothing is dropped.
+function Group-ContextSections {
+    param([string[]]$Sections, [int]$MaxChars)
+    $messages = [System.Collections.Generic.List[string]]::new()
+    $current = [System.Text.StringBuilder]::new()
+
+    foreach ($section in @($Sections)) {
+        if ($null -eq $section) { continue }
+        $parts = if ($section.Length -gt $MaxChars) { Split-TextIntoChunks -Text $section -MaxChars $MaxChars } else { @($section) }
+        foreach ($part in $parts) {
+            $needed = $part.Length + $(if ($current.Length -gt 0) { 2 } else { 0 })
+            if ($current.Length -gt 0 -and $current.Length + $needed -gt $MaxChars) {
+                $messages.Add($current.ToString())
+                $current.Clear() | Out-Null
+            }
+            if ($current.Length -gt 0) { $current.Append("`n`n") | Out-Null }
+            $current.Append($part) | Out-Null
+        }
+    }
+    if ($current.Length -gt 0) { $messages.Add($current.ToString()) }
+    if ($messages.Count -eq 0) { $messages.Add("") }
+    return $messages.ToArray()
+}
+
+# ===========================================================================
+# Attachment download / inlining
+# ===========================================================================
+function Get-UrlBytes {
+    param([string]$Url, [int]$MaxBytes)
+    if (-not $Url) { return $null }
+    $handler = [System.Net.Http.HttpClientHandler]::new()
+    $client = [System.Net.Http.HttpClient]::new($handler)
+    try {
+        $resp = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+        if (-not $resp.IsSuccessStatusCode) { return $null }
+        $stream = $resp.Content.ReadAsStream()
+        $ms = [System.IO.MemoryStream]::new()
+        $buf = [byte[]]::new(65536)
+        while (($n = $stream.Read($buf, 0, $buf.Length)) -gt 0) {
+            $ms.Write($buf, 0, $n)
+            if ($MaxBytes -gt 0 -and $ms.Length -ge $MaxBytes) { break }
+        }
+        return $ms.ToArray()
+    } catch {
+        return $null
+    } finally {
+        $client.Dispose()
+        $handler.Dispose()
+    }
+}
+
+function ConvertTo-AttachmentSection {
+    param($Attachment, $Bytes, [int]$MaxChars)
+    # Single-quoted fence: inside a double-quoted string a literal ``` needs each
+    # backtick doubled, which silently produced "```n" instead of a fence+newline.
+    $fence = '```'
+    if ($null -eq $Bytes) {
+        return "### Attachment: $($Attachment.Name) ($($Attachment.ContentType))`n`n(could not download)"
+    }
+    $text = [System.Text.Encoding]::UTF8.GetString($Bytes)
+    $text = $text -replace "^\uFEFF", ""
+    if ($MaxChars -gt 0 -and $text.Length -gt $MaxChars) { $text = Limit-Text -Text $text -MaxChars $MaxChars }
+    return "### Attachment: $($Attachment.Name) ($($Attachment.ContentType), $($Attachment.Size) bytes)`n`n$fence`n$text`n$fence"
 }
 
 # ===========================================================================
@@ -228,12 +668,13 @@ function Format-TicketContents {
 function Redact-PII {
     param([string]$Text)
     $out = [regex]::Replace($Text, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[redacted-email]')
-    # International, parenthesised, NANP 3-3-4, bare long runs, 0-prefixed national.
+    # International, parenthesised, NANP 3-3-4, 0-prefixed national.
+    # NO bare \d{10,15} rule: Freshservice ids and signed-URL params (Expires=)
+    # are long digit runs, and redacting them corrupted attachment URLs.
     $patterns = @(
         '\+\d[\d \t().-]{5,}\d',
         '\(\d{3}\)[ .-]?\d{3}[ .-]\d{4}',
         '\b\d{3}[ .-]\d{3}[ .-]\d{4}\b',
-        '\b\d{10,15}\b',
         '\b0\d{1,3}[ .-]\d{3,4}[ .-]?\d{3,4}\b',
         '\b0\d{9,10}\b'
     )
@@ -341,6 +782,45 @@ function ConvertFrom-JwtPayload {
 }
 
 # ===========================================================================
+# Conversation id: temporary by default, overridable / resumable
+# ===========================================================================
+function Get-StatePath {
+    if ($Config.StateFile) { return $Config.StateFile }
+    $dir = if ($env:M365_CONFIG_DIR) { $env:M365_CONFIG_DIR } else { Join-Path $HOME ".config/m365-ask" }
+    return Join-Path $dir "last-ticket-conversation.json"
+}
+
+function Read-LastConversationId {
+    $path = Get-StatePath
+    if (-not [System.IO.File]::Exists($path)) { return "" }
+    try { return [string](([System.IO.File]::ReadAllText($path) | ConvertFrom-Json).conversationId) } catch { return "" }
+}
+
+function Write-LastConversationId {
+    param([string]$Id)
+    if (-not $Id) { return }
+    $path = Get-StatePath
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $path)) | Out-Null
+    $state = [ordered]@{ conversationId = $Id; when = [DateTime]::UtcNow.ToString("o") }
+    [System.IO.File]::WriteAllText($path, ($state | ConvertTo-Json))
+}
+
+# Explicit -ConversationId wins; then a remembered id (-LastConversation); else new.
+# Kept pure (last id and id factory are passed in) so it can be unit tested.
+function Resolve-ConversationId {
+    param(
+        [string]$Explicit = "",
+        [bool]$UseLast = $false,
+        [string]$Last = "",
+        [scriptblock]$NewId = $null
+    )
+    if ($Explicit) { return $Explicit }
+    if ($UseLast -and $Last) { return $Last }
+    if ($NewId) { return (& $NewId) }
+    return [guid]::NewGuid().ToString()
+}
+
+# ===========================================================================
 # WebSocket + one M365 Copilot chat turn
 # ===========================================================================
 function Send-WsText {
@@ -373,14 +853,33 @@ function Add-StreamText {
 }
 
 function New-ChatFrame {
-    param([string]$RequestId, [string]$SessionId, [string]$Text)
+    param([string]$RequestId, [string]$SessionId, [string]$Text, [bool]$IsFirstTurn = $true, $Attachments = @(), $FileAttachments = @())
+    $annotations = @(@(New-ImageAnnotations -Uploads $Attachments) + @(New-FileAnnotations -Uploads $FileAttachments))
+    $optionsSets = @($CodeInterpreter)
+    if ($annotations.Count -gt 0) { $optionsSets += $ImageOptionsSets }
+    $message = [ordered]@{
+        author = "user"
+        inputMethod = "Keyboard"
+        text = $Text
+        entityAnnotationTypes = @("People", "File", "Event", "Email", "TeamsMessage")
+        requestId = $RequestId
+        locationInfo = [ordered]@{ timeZoneOffset = 0; timeZone = "UTC" }
+        locale = "en-gb"
+        messageType = "Chat"
+        experienceType = "Default"
+        adaptiveCards = @()
+        clientPreferences = @{}
+    }
+    # Only present when an image is attached — verified live: without this the
+    # model does not see the image at all.
+    if ($annotations.Count -gt 0) { $message["messageAnnotations"] = $annotations }
     $frame = [ordered]@{
         arguments = @(
             [ordered]@{
                 source = "officeweb"
                 clientCorrelationId = $RequestId
                 sessionId = $SessionId
-                optionsSets = $CodeInterpreter
+                optionsSets = $optionsSets
                 streamingMode = "ConciseWithPadding"
                 spokenTextMode = "None"
                 options = @{}
@@ -393,7 +892,7 @@ function New-ChatFrame {
                 sliceIds = @()
                 threadLevelGptId = @{}
                 traceId = $RequestId
-                isStartOfSession = $true
+                isStartOfSession = $IsFirstTurn
                 clientInfo = [ordered]@{
                     clientPlatform = "mcmcopilot-web"
                     clientAppName = "Office"
@@ -403,19 +902,7 @@ function New-ChatFrame {
                     deviceOS = "Linux"
                     deviceType = "Desktop"
                 }
-                message = [ordered]@{
-                    author = "user"
-                    inputMethod = "Keyboard"
-                    text = $Text
-                    entityAnnotationTypes = @("People", "File", "Event", "Email", "TeamsMessage")
-                    requestId = $RequestId
-                    locationInfo = [ordered]@{ timeZoneOffset = 0; timeZone = "UTC" }
-                    locale = "en-gb"
-                    messageType = "Chat"
-                    experienceType = "Default"
-                    adaptiveCards = @()
-                    clientPreferences = @{}
-                }
+                message = $message
                 plugins = @([ordered]@{ Id = "BingWebSearch"; Source = "BuiltIn" })
                 isSbsSupported = $true
                 tone = "magic"   # M365 auto model selection
@@ -447,25 +934,134 @@ function New-MetricsFrame {
     return ($frame | ConvertTo-Json -Depth 20 -Compress)
 }
 
-function Invoke-CopilotTurn {
-    param([string]$Token, [string]$Text)
-
-    $claims = ConvertFrom-JwtPayload -Token $Token
-    $requestId = [guid]::NewGuid().ToString()
-    $sessionId = [guid]::NewGuid().ToString()
-    $conversationId = [guid]::NewGuid().ToString()
-
+# Builds the ChatHub URL. `disableMemory=1` is what makes the chat temporary
+# (no long-term memory, absent from history); it is sent by default.
+function New-ChatHubUrl {
+    param(
+        [string]$Oid, [string]$Tid, [string]$SessionId, [string]$ConversationId,
+        [string]$RequestId, [string]$Token, [bool]$Temporary = $true
+    )
     $query = [ordered]@{
-        chatsessionid = $requestId; clientrequestid = $requestId
-        "X-SessionId" = $sessionId; ConversationId = $conversationId
-        access_token = $Token; variants = $Variants; source = '"officeweb"'
-        product = "Office"; agentHost = "Bizchat.FullScreen"; licenseType = "Starter"
-        agent = "web"; scenario = "OfficeWebIncludedCopilot"
+        chatsessionid = $RequestId; clientrequestid = $RequestId
+        "X-SessionId" = $SessionId; ConversationId = $ConversationId
     }
+    if ($Temporary) { $query["disableMemory"] = "1" }
+    $query["access_token"] = $Token
+    $query["variants"] = $Variants
+    $query["source"] = '"officeweb"'
+    $query["product"] = "Office"
+    $query["agentHost"] = "Bizchat.FullScreen"
+    $query["licenseType"] = "Starter"
+    $query["agent"] = "web"
+    $query["scenario"] = "OfficeWebIncludedCopilot"
     $qs = ($query.GetEnumerator() | ForEach-Object {
         "$([uri]::EscapeDataString([string]$_.Key))=$([uri]::EscapeDataString([string]$_.Value))"
     }) -join "&"
-    $url = "wss://substrate.office.com/m365Copilot/Chathub/$($claims.oid)@$($claims.tid)?$qs"
+    return "wss://substrate.office.com/m365Copilot/Chathub/$($Oid)@$($Tid)?$qs"
+}
+
+# A Graph token, for the OneDrive/file path. The first-party client is
+# pre-consented for /.default; a per-scope request is rejected (AADSTS65002).
+# Only the rotated REFRESH token is persisted, so the cached Sydney access token
+# in the same file is left intact.
+function Get-GraphToken {
+    if ($env:M365_GRAPH_TOKEN) { return $env:M365_GRAPH_TOKEN }
+    $saved = Read-TokenFile
+    $refreshToken = if ($env:M365_REFRESH_TOKEN) { $env:M365_REFRESH_TOKEN }
+        elseif ($saved -and $saved.refreshToken) { $saved.refreshToken }
+        else { $Config.RefreshToken }
+    if (-not $refreshToken) { throw "no refresh token available to mint a Graph token" }
+    $body = @{
+        grant_type = "refresh_token"; client_id = $Config.ClientId
+        refresh_token = $refreshToken; scope = "https://graph.microsoft.com/.default"
+    }
+    try {
+        $resp = Invoke-RestMethod -Method Post -Uri $TokenUrl -Body $body -ContentType "application/x-www-form-urlencoded"
+    } catch {
+        throw "Graph token grant failed: $($_.Exception.Message)"
+    }
+    Write-TokenFile @{
+        accessToken = $(if ($saved) { $saved.accessToken } else { $null })
+        expiresAt = $(if ($saved) { $saved.expiresAt } else { 0 })
+        refreshToken = $(if ($resp.refresh_token) { $resp.refresh_token } else { $refreshToken })
+    }
+    return $resp.access_token
+}
+
+# Uploads one file into the OneDrive "Microsoft Copilot Chat Files" folder and
+# returns `{ driveId, itemId, fileName, webUrl }` for New-FileAnnotations.
+# Images do NOT use this path — they use Send-CopilotImage.
+function Send-CopilotFile {
+    param([string]$GraphToken, [byte[]]$Bytes, [string]$FileName, [string]$MimeType = "application/octet-stream")
+    $graph = "https://graph.microsoft.com/v1.0"
+    $headers = @{ Authorization = "Bearer $GraphToken" }
+    $folder = Invoke-RestMethod -Uri "$graph/me/drive/special/copilotuploads" -Headers $headers -Method Get
+    $driveId = $folder.parentReference.driveId
+    if (-not $driveId) { throw "could not resolve the copilotuploads drive" }
+
+    $enc = [uri]::EscapeDataString($FileName)
+    $sessionBody = @{ item = @{ "@microsoft.graph.conflictBehavior" = "replace" } } | ConvertTo-Json -Compress
+    $session = Invoke-RestMethod -Uri "$graph/me/drive/special/copilotuploads:/${enc}:/createUploadSession" `
+        -Headers $headers -Method Post -Body $sessionBody -ContentType "application/json"
+    if (-not $session.uploadUrl) { throw "createUploadSession returned no uploadUrl" }
+
+    # An upload-session PUT needs Content-Range even for a single request.
+    $putHeaders = @{
+        "Content-Range" = "bytes 0-$($Bytes.Length - 1)/$($Bytes.Length)"
+    }
+    $item = Invoke-RestMethod -Uri $session.uploadUrl -Method Put -Headers $putHeaders -Body $Bytes -ContentType $MimeType
+    return [pscustomobject]@{
+        driveId = $driveId; itemId = $item.id; fileName = $item.name; webUrl = $item.webUrl
+    }
+}
+
+# POST /m365Copilot/UploadFile — returns docId, which a later turn attaches via
+# New-ImageAnnotations. `-Form` builds the multipart body (boundary included).
+function Send-CopilotImage {
+    param(
+        [string]$Token, [string]$ConversationId, [byte[]]$Bytes,
+        [string]$FileName, [string]$MimeType = "image/png", [string]$Scenario = "UploadImage"
+    )
+    $claims = ConvertFrom-JwtPayload -Token $Token
+    $headers = @{
+        Authorization = "Bearer $Token"
+        "X-AnchorMailbox" = "Oid:$($claims.oid)@$($claims.tid)"
+        "X-Scenario" = "OfficeWebIncludedCopilot"
+        "X-Variants" = "feature.EnableImageSupportInUploadFile"
+        Origin = "https://copilot.cloud.microsoft"
+    }
+    $dataUrl = "data:$MimeType;base64," + [Convert]::ToBase64String($Bytes)
+    $form = @{
+        scenario = $Scenario
+        conversationId = $ConversationId
+        FileBase64 = $dataUrl
+        FileName = $FileName
+    }
+    return Invoke-RestMethod -Method Post -Uri "https://substrate.office.com/m365Copilot/UploadFile" `
+        -Headers $headers -Form $form
+}
+
+# One turn. Pass the SAME -SessionId/-ConversationId across turns to keep the
+# server-side context; -IsFirstTurn only on the first.
+function Invoke-CopilotTurn {
+    param(
+        [string]$Token,
+        [string]$Text,
+        [string]$SessionId = "",
+        [string]$ConversationId = "",
+        [bool]$IsFirstTurn = $true,
+        [bool]$Temporary = $true,
+        $Attachments = @(),
+        $FileAttachments = @()
+    )
+
+    $claims = ConvertFrom-JwtPayload -Token $Token
+    $requestId = [guid]::NewGuid().ToString()
+    if (-not $SessionId) { $SessionId = [guid]::NewGuid().ToString() }
+    if (-not $ConversationId) { $ConversationId = [guid]::NewGuid().ToString() }
+
+    $url = New-ChatHubUrl -Oid $claims.oid -Tid $claims.tid -SessionId $SessionId `
+        -ConversationId $ConversationId -RequestId $requestId -Token $Token -Temporary $Temporary
 
     $ws = [System.Net.WebSockets.ClientWebSocket]::new()
     $ws.Options.SetRequestHeader("Origin", "https://m365.cloud.microsoft")
@@ -485,7 +1081,7 @@ function Invoke-CopilotTurn {
         throw "WebSocket connect failed: $($_.Exception.Message)"
     }
 
-    $chatFrame = New-ChatFrame -RequestId $requestId -SessionId $sessionId -Text $Text
+    $chatFrame = New-ChatFrame -RequestId $requestId -SessionId $SessionId -Text $Text -IsFirstTurn $IsFirstTurn -Attachments $Attachments -FileAttachments $FileAttachments
     $metricsFrame = New-MetricsFrame
     Send-WsText -Ws $ws -Text ('{"protocol":"json","version":1}' + $RS)
 
@@ -561,7 +1157,190 @@ function Invoke-CopilotTurn {
 
     try { $ws.Dispose() } catch { }
     $cts.Dispose()
-    return @{ Text = $answer; HasContent = $hasContent; MessageType = $messageType; ContentOrigin = $contentOrigin }
+    return @{
+        Text = $answer; HasContent = $hasContent; MessageType = $messageType
+        ContentOrigin = $contentOrigin; SessionId = $SessionId; ConversationId = $ConversationId
+    }
+}
+
+# ===========================================================================
+# run ticket -> context -> multi-message Copilot conversation
+# ===========================================================================
+function Invoke-AskTicket {
+    param(
+        [int]$Id,
+        [string]$Instruction,
+        [string]$ConversationId = "",
+        [bool]$Temporary = $true
+    )
+
+    $data = Get-TicketData -Id $Id
+    $attachments = @($data.Attachments)
+    # NB: must NOT be named $plan — that shadows the script's [switch]$Plan and
+    # makes the `if ($Plan)` early-return below fire on every run.
+    $attachmentPlan = Get-AttachmentPlan -Attachments $attachments `
+        -MaxInlineFileBytes $Config.MaxInlineFileBytes `
+        -MaxInlineFiles $Config.MaxInlineFiles `
+        -TextExtensions $Config.InlineTextExtensions
+
+    $sections = [System.Collections.Generic.List[string]]::new()
+    foreach ($s in (Format-TicketSections -Ticket $data.Ticket -Conversations $data.Conversations -Attachments $attachments)) {
+        $sections.Add($s)
+    }
+
+    # Inline the text-bearing attachments (this is what gives the model content).
+    foreach ($f in $attachmentPlan.Inline) {
+        $bytes = Get-UrlBytes -Url $f.Url -MaxBytes $Config.MaxInlineFileBytes
+        $sections.Add((ConvertTo-AttachmentSection -Attachment $f -Bytes $bytes -MaxChars $Config.MaxFileChars))
+    }
+
+    if ($Config.Redact) {
+        for ($i = 0; $i -lt $sections.Count; $i++) { $sections[$i] = Redact-PII -Text $sections[$i] }
+    }
+
+    $messages = Group-ContextSections -Sections $sections.ToArray() -MaxChars $Config.MaxTextChars
+    $truncated = $false
+    if ($messages.Count -gt $Config.MaxMessages) {
+        $messages = $messages[0..($Config.MaxMessages - 1)]
+        $truncated = $true
+    }
+
+    $totalAttachments = $attachmentPlan.ImageCount + @($attachments | Where-Object { -not $_.IsImage -and $_.Url }).Count
+    $attachmentBatches = [math]::Ceiling($totalAttachments / [double]$Config.MaxAttachmentsPerMessage)
+
+    Write-Host ("[ask-ticket] ticket=$Id conversations=$($data.Conversations.Count) attachments=$($attachments.Count) " +
+        "(images=$($attachmentPlan.ImageCount), inlined=$($attachmentPlan.Inline.Count), listed-only=$($attachmentPlan.ListedOnly.Count))")
+    Write-Host ("[ask-ticket] messages=$($messages.Count) of <=$($Config.MaxTextChars) chars; " +
+        "$attachmentBatches attachment batch(es) of <=$($Config.MaxAttachmentsPerMessage) (images and files share the cap)")
+
+    Write-Host ("[ask-ticket] mode=" + $(if ($Temporary) { "temporary" } else { "persistent" }) +
+        " conversation=$(if ($ConversationId) { $ConversationId } else { '<new>' })")
+
+    if ($Plan) { return $messages }
+
+    $accessToken = Get-M365AccessToken
+    $sessionId = [guid]::NewGuid().ToString()
+    if (-not $ConversationId) { $ConversationId = [guid]::NewGuid().ToString() }
+    # ---- attachments: upload, then attach via messageAnnotations ----
+    # The per-message cap is SHARED between images and files (verified live:
+    # 1 image + 2 files = 3 accepted; a 4th of either kind is refused, and 3
+    # images refuse any file). So batch them TOGETHER, in one count.
+    $cap = $Config.MaxAttachmentsPerMessage
+    $uploaded = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($img in @($attachmentPlan.Images)) {
+        $bytes = Get-UrlBytes -Url $img.Url -MaxBytes $Config.MaxImageBytes
+        if ($null -eq $bytes) { Write-Host "[ask-ticket] could not download $($img.Name)"; continue }
+        $mime = if ($img.ContentType) { $img.ContentType } else { "image/png" }
+        try {
+            $u = Send-CopilotImage -Token $accessToken -ConversationId $ConversationId -Bytes $bytes -FileName $img.Name -MimeType $mime
+            if ($u.docId) {
+                $uploaded.Add([pscustomobject]@{ Kind = "image"; Result = $u })
+                Write-Host "[ask-ticket] uploaded image $($img.Name)"
+            }
+        } catch {
+            Write-Host "[ask-ticket] image upload failed for $($img.Name): $($_.Exception.Message)"
+        }
+    }
+
+    # ---- files (documents): Graph -> copilotuploads -> LocalFile annotation ----
+    $fileItems = @($attachments | Where-Object { -not $_.IsImage -and $_.Url })
+    if ($fileItems.Count -gt 0) {
+        try {
+            $graphToken = Get-GraphToken
+        } catch {
+            Write-Host "[ask-ticket] no Graph token, skipping file uploads: $($_.Exception.Message)"
+            $graphToken = $null
+        }
+        if ($graphToken) {
+            foreach ($f in $fileItems) {
+                $bytes = Get-UrlBytes -Url $f.Url -MaxBytes ($Config.MaxInlineFileBytes * 100)
+                if ($null -eq $bytes) { Write-Host "[ask-ticket] could not download $($f.Name)"; continue }
+                $mime = if ($f.ContentType) { $f.ContentType } else { "application/octet-stream" }
+                try {
+                    $u = Send-CopilotFile -GraphToken $graphToken -Bytes $bytes -FileName $f.Name -MimeType $mime
+                    if ($u.itemId) {
+                        $uploaded.Add([pscustomobject]@{ Kind = "file"; Result = $u })
+                        Write-Host "[ask-ticket] uploaded file $($f.Name)"
+                    }
+                } catch {
+                    Write-Host "[ask-ticket] file upload failed for $($f.Name): $($_.Exception.Message)"
+                }
+            }
+        }
+    }
+
+    # How many attachments fit is derived from the turn budget - each extra batch is a turn.
+    $budget = Get-ImageBudget -MaxMessages $Config.MaxMessages -ContextTurns $messages.Count `
+        -MaxPerMessage $cap -ImageCount $uploaded.Count
+    if ($budget.Capped) {
+        Write-Host "[ask-ticket] turn budget ($($Config.MaxMessages)) allows $($budget.Allowed) attachment(s); skipping $($uploaded.Count - $budget.Allowed)"
+    }
+    if ($budget.Allowed -le 0) { $items = @() }
+    elseif ($uploaded.Count -gt $budget.Allowed) { $items = @($uploaded[0..($budget.Allowed - 1)]) }
+    else { $items = @($uploaded) }
+
+    $attachBatches = [System.Collections.Generic.List[object]]::new()
+    for ($i = 0; $i -lt $items.Count; $i += $cap) {
+        $end = [math]::Min($i + $cap - 1, $items.Count - 1)
+        $attachBatches.Add(@($items[$i..$end]))
+    }
+
+    $turns = [System.Collections.Generic.List[object]]::new()
+    for ($i = 0; $i -lt ($messages.Count - 1); $i++) {
+        $turns.Add([pscustomobject]@{
+            Text = "Part $($i + 1) of $($messages.Count) of a Freshservice ticket's context. " +
+                   "Acknowledge with only: ACK`n`n<<<CONTEXT`n$($messages[$i])`nCONTEXT>>>"
+            Attachments = @()
+            FileAttachments = @()
+        })
+    }
+    for ($b = 0; $b -lt ($attachBatches.Count - 1); $b++) {
+        $batch = $attachBatches[$b]
+        $turns.Add([pscustomobject]@{
+            Text = "Batch $($b + 1) of $($attachBatches.Count) of the ticket's attachments. Acknowledge with only: ACK"
+            Attachments = @($batch | Where-Object { $_.Kind -eq "image" } | ForEach-Object { $_.Result })
+            FileAttachments = @($batch | Where-Object { $_.Kind -eq "file" } | ForEach-Object { $_.Result })
+        })
+    }
+    $finalBatch = if ($attachBatches.Count -gt 0) { $attachBatches[$attachBatches.Count - 1] } else { @() }
+    $turns.Add([pscustomobject]@{
+        Text = (New-PromptText -Context $messages[$messages.Count - 1] -Instruction $Instruction -System $Config.SystemPrompt)
+        Attachments = @($finalBatch | Where-Object { $_.Kind -eq "image" } | ForEach-Object { $_.Result })
+        FileAttachments = @($finalBatch | Where-Object { $_.Kind -eq "file" } | ForEach-Object { $_.Result })
+    })
+
+    Write-Host ""
+    $answer = $null
+    for ($i = 0; $i -lt $turns.Count; $i++) {
+        $isFirst = ($i -eq 0)
+        $isLast = ($i -eq $turns.Count - 1)
+        $nImages = @($turns[$i].Attachments).Count
+        $nFiles = @($turns[$i].FileAttachments).Count
+        Write-Host "[ask-ticket] turn $($i + 1)/$($turns.Count) ($($turns[$i].Text.Length) chars, $nImages image(s), $nFiles file(s))"
+        $result = Invoke-CopilotTurn -Token $accessToken -Text $turns[$i].Text `
+            -SessionId $sessionId -ConversationId $ConversationId -IsFirstTurn $isFirst `
+            -Temporary $Temporary -Attachments $turns[$i].Attachments -FileAttachments $turns[$i].FileAttachments
+
+        if ($isLast) {
+            $answer = $result
+        } elseif ($result.MessageType -eq "Disengaged") {
+            throw "M365 disengaged while ingesting context (turn $($i + 1)) - the ticket content tripped its filter."
+        }
+    }
+
+    Write-Host ""
+    if ($answer.MessageType -eq "Disengaged") {
+        throw "M365 disengaged (safety filter) - rephrase the prompt."
+    }
+    if (-not $answer.HasContent) {
+        throw "M365 returned no content (throttled/degraded) - retry later."
+    }
+    # Remember it so the next run can use -LastConversation.
+    Write-LastConversationId -Id $ConversationId
+    Write-Host ("[ask-ticket] origin=$($answer.ContentOrigin ?? '?') type=$($answer.MessageType ?? 'Chat') " +
+        "conversation=$ConversationId$(if ($truncated) { ' [context truncated at MaxMessages]' })")
+    return $answer.Text
 }
 
 # ===========================================================================
@@ -573,33 +1352,29 @@ if ($MyInvocation.InvocationName -ne ".") {
         exit 1
     }
     if ([string]::IsNullOrWhiteSpace($Prompt) -or $TicketId -le 0) {
-        Write-Error 'usage: ask-ticket-standalone.ps1 "<prompt>" <ticket-id>'
+        Write-Error 'usage: ask-ticket-standalone.ps1 [-Plan] [-ConversationId <guid> | -LastConversation] [-Persist] "<prompt>" <ticket-id>'
+        exit 2
+    }
+    if ($ConversationId -and $LastConversation) {
+        Write-Error "error: pass either -ConversationId or -LastConversation, not both"
         exit 2
     }
 
     try {
-        $data = Get-TicketData -Id $TicketId
-        $rendered = Format-TicketContents -Ticket $data.Ticket -Conversations $data.Conversations
-        $raw = if ($Config.Redact) { Redact-PII -Text $rendered } else { $rendered }
-        $context = Limit-Text -Text $raw -MaxChars $Config.MaxChars
-        if ($context.Length -lt $raw.Length) {
-            Write-Host "[ask-ticket] payload truncated $($raw.Length) -> $($context.Length) chars"
+        $lastId = if ($LastConversation) { Read-LastConversationId } else { "" }
+        if ($LastConversation -and -not $lastId) {
+            Write-Error "error: -LastConversation given but nothing is recorded yet ($(Get-StatePath))"
+            exit 2
         }
-
-        $accessToken = Get-M365AccessToken
-        $fullText = New-PromptText -Context $context -Instruction $Prompt -System $Config.SystemPrompt
-        $result = Invoke-CopilotTurn -Token $accessToken -Text $fullText
-        Write-Host ""
-
-        if ($result.MessageType -eq "Disengaged") {
-            Write-Error "[ask-ticket] M365 disengaged (safety filter) - rephrase the prompt."
-            exit 1
+        $useConversationId = Resolve-ConversationId -Explicit $ConversationId -UseLast ([bool]$LastConversation) -Last $lastId
+        $useTemporary = ($Config.Temporary -and -not $Persist)
+        $result = Invoke-AskTicket -Id $TicketId -Instruction $Prompt -ConversationId $useConversationId -Temporary $useTemporary
+        if ($Plan) {
+            for ($i = 0; $i -lt $result.Count; $i++) {
+                Write-Host "`n===== message $($i + 1)/$($result.Count) ($($result[$i].Length) chars) ====="
+                Write-Host $result[$i]
+            }
         }
-        if (-not $result.HasContent) {
-            Write-Error "[ask-ticket] M365 returned no content (throttled/degraded) - retry later."
-            exit 1
-        }
-        Write-Host "[ask-ticket] origin=$($result.ContentOrigin ?? '?') type=$($result.MessageType ?? 'Chat')"
     } catch {
         Write-Error "error: $($_.Exception.Message)"
         exit 1

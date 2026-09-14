@@ -34,6 +34,10 @@ const SCOPES = [
   "https://substrate.office.com/sydney/M365Chat.Read",
   "https://substrate.office.com/sydney/sydney.readwrite",
 ];
+// Graph needs its own token. The first-party client is pre-consented for
+// `/.default` (a per-scope request like Files.ReadWrite is rejected with
+// AADSTS65002); `.default` returns Files.ReadWrite.All among others.
+const GRAPH_SCOPES = ["https://graph.microsoft.com/.default"];
 
 const CONFIG_DIR = process.env.M365_CONFIG_DIR || join(homedir(), ".config", "m365-ask");
 const CACHE_FILE = process.env.M365_CACHE_FILE || join(CONFIG_DIR, "msal-cache.json");
@@ -200,12 +204,12 @@ function saveTokenFile(obj) {
 
 /** Exchange a refresh token for a fresh access token. Returns the rotated
  *  refresh token too — persist it. */
-export async function refreshTokenGrant(refreshToken) {
+export async function refreshTokenGrant(refreshToken, scopes = SCOPES) {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     client_id: CLIENT_ID,
     refresh_token: refreshToken,
-    scope: SCOPES.join(" "),
+    scope: scopes.join(" "),
   });
   const res = await fetch("https://login.microsoftonline.com/common/oauth2/v2.0/token", {
     method: "POST",
@@ -232,6 +236,23 @@ export function getToken() {
   return (inflight ??= doGetToken().finally(() => {
     inflight = null;
   }));
+}
+
+/**
+ * A Graph access token, for the OneDrive/file-attachment path.
+ * Rotates ONLY the refresh token in the shared token file, so the cached Sydney
+ * access token is left intact.
+ */
+export async function getGraphToken() {
+  if (process.env.M365_GRAPH_TOKEN) return process.env.M365_GRAPH_TOKEN;
+  const saved = loadTokenFile();
+  const refreshToken = process.env.M365_REFRESH_TOKEN || saved?.refreshToken;
+  if (!refreshToken) {
+    throw new Error("no refresh token available to mint a Graph token (set M365_REFRESH_TOKEN or M365_GRAPH_TOKEN)");
+  }
+  const t = await refreshTokenGrant(refreshToken, GRAPH_SCOPES);
+  saveTokenFile({ accessToken: saved?.accessToken, expiresAt: saved?.expiresAt, refreshToken: t.refreshToken });
+  return t.accessToken;
 }
 
 async function doGetToken() {

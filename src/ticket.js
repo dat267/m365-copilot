@@ -4,16 +4,35 @@
 // rendering, and the injected HTTP boundary that fetches a ticket. Tested with
 // `node --test`.
 
+import { renderAttachmentManifest } from "./attachments.js";
+
 /** Marker inserted where an over-budget payload was elided. Constant length so
  *  the truncated result is exactly `maxChars` long. */
 export const TRUNCATION_MARKER = "\n\n[...truncated...]\n\n";
 
+/**
+ * Normalises a Freshservice attachment into `{ name, contentType, size, url, source }`.
+ *
+ * The private `api/_` attachment object could not be confirmed from a capture
+ * (the sampled tickets had none), so the well-known public-API field names are
+ * accepted along with their common variants.
+ */
+export function normalizeAttachment(raw, source) {
+  const a = raw ?? {};
+  return {
+    name: a.name ?? a.filename ?? a.file_name ?? "",
+    contentType: a.content_type ?? a.contentType ?? a.mime_type ?? "",
+    size: a.size ?? a.file_size ?? a.content_length ?? null,
+    url: a.attachment_url ?? a.url ?? a.download_url ?? "",
+    source,
+  };
+}
+
 /** Fetches a ticket and all of its conversations. `get(path, query)` is the
- *  injected HTTP boundary; it returns parsed JSON. */
-export async function fetchTicket(id, get) {
+ *  injected HTTP boundary; it returns parsed JSON. */export async function fetchTicket(id, get) {
   const { ticket } = await get(`tickets/${id}`);
   const conversations = [];
-  const maxPages = 1000; // safety cap, mirrors fsvc's MaxPages
+  const maxPages = 1000; // safety cap
   for (let page = 1; page <= maxPages; page++) {
     const res = await get(`tickets/${id}/conversations`, {
       per_page: "100",
@@ -24,14 +43,36 @@ export async function fetchTicket(id, get) {
     conversations.push(...(res.conversations ?? []));
     if (!res.meta?.has_next) break;
   }
-  return { ticket, conversations };
+
+  const attachments = [
+    ...collectAttachments(ticket, "ticket"),
+    ...conversations.flatMap((c) => collectAttachments(c, `conversation ${c.id}`)),
+    ...(await fetchLinkedAttachments(id, get)),
+  ];
+
+  return { ticket, conversations, attachments };
+}
+
+function collectAttachments(container, source) {
+  const raw = [...(container?.attachments ?? []), ...(container?.cloud_files ?? [])];
+  return raw.map((a) => normalizeAttachment(a, source));
+}
+
+/** `linked-attachments` is a separate, newer endpoint — treat it as optional so
+ *  an older Freshservice build (or a plan without it) doesn't fail the fetch. */
+async function fetchLinkedAttachments(id, get) {
+  try {
+    const res = await get(`tickets/${id}/linked-attachments`);
+    return (res?.attachments ?? []).map((a) => normalizeAttachment(a, "linked"));
+  } catch {
+    return [];
+  }
 }
 
 const STATUS_NAMES = { 2: "Open", 3: "Pending", 4: "Resolved", 5: "Closed" };
 const PRIORITY_NAMES = { 1: "Low", 2: "Medium", 3: "High", 4: "Urgent" };
 const URGENCY_IMPACT_NAMES = { 1: "Low", 2: "Medium", 3: "High" };
 
-// label, key, nameKey — mirrors fsvc show.go ticketMetaFields.
 const META_FIELDS = [
   ["Status", "status", "status_name"],
   ["Priority", "priority", "priority_name"],
@@ -61,7 +102,7 @@ function decodeEntities(s) {
   });
 }
 
-/** Removes HTML tags and decodes entities, mirroring fsvc's stripHTML. */
+/** Removes HTML tags and decodes entities. */
 function stripHtml(s) {
   return decodeEntities(String(s ?? "").replace(/<[^>]*>/g, "")).trim();
 }
@@ -80,10 +121,12 @@ function conversationAuthor(c) {
   return name || fieldValue(c, "user_id");
 }
 
-/** Renders a ticket and its conversation trace as a Markdown document,
- *  mirroring `fsvc tickets show`. No images/attachments are downloaded — this
- *  text is fed to a model, not saved to disk. */
-export function renderTicket(ticket, conversations) {
+/** Renders a ticket and its conversation trace as a Markdown document.
+ *
+ *  Attachment *contents* are not downloaded — but their inventory is listed so
+ *  the model knows the complete set, including anything that cannot be
+ *  delivered in one message (see ../README.md "Ticket attachments"). */
+export function renderTicket(ticket, conversations, { attachments = [] } = {}) {
   const display = fieldValue(ticket, "display_id") || fieldValue(ticket, "id");
   const width = Math.max(...META_FIELDS.map(([label]) => label.length));
   const out = [`# Ticket #${display} — ${fieldValue(ticket, "subject")}`, ""];
@@ -107,32 +150,42 @@ export function renderTicket(ticket, conversations) {
     out.push(body || "(no body)");
     out.push("");
   }
+
+  out.push("", renderAttachmentManifest(attachments), "");
   return out.join("\n");
 }
 
-/** Resolves Freshservice credentials, mirroring fsvc/min:
- *  `FSVC_CONFIG_FILE` → `./fsvc.json` → `io.defaultPath`, with env vars
- *  overriding file values. Returns `{ baseUrl, session }`. */
+/** Resolves Freshservice credentials. This repo owns its own config — it does
+ *  NOT read fsvc's (`fsvc.json` / `FSVC_*`); nothing here shells out to or
+ *  depends on the fsvc tool.
+ *
+ *  Precedence: env vars, then the config file at `M365_FRESHSERVICE_CONFIG`,
+ *  else `./freshservice.json`, else `io.defaultPath`.
+ *
+ *  Config file keys: `{ "subdomain": "acme", "session": "...", "baseUrl": "" }`.
+ *  Env vars: `FRESHSERVICE_SUBDOMAIN`, `FRESHSERVICE_SESSION`,
+ *  `FRESHSERVICE_BASE_URL`.
+ *
+ *  Returns `{ baseUrl, session }`. */
 export function resolveConfig(env, io) {
   let file = {};
-  const path = env.FSVC_CONFIG_FILE || (io.exists("fsvc.json") ? "fsvc.json" : io.defaultPath);
+  const localPath = "freshservice.json";
+  const path = env.M365_FRESHSERVICE_CONFIG || (io.exists(localPath) ? localPath : io.defaultPath);
   if (path && io.exists(path)) {
     file = JSON.parse(io.readFile(path));
   }
-  const subdomain = env.FSVC_SUBDOMAIN ?? file.subdomain;
-  const session = env.FSVC_ITILDESK_SESSION ?? file["itildesk-session"];
-  const override = env.FSVC_BASE_URL ?? file["base-url"];
+  const subdomain = env.FRESHSERVICE_SUBDOMAIN ?? file.subdomain;
+  const session = env.FRESHSERVICE_SESSION ?? file.session;
+  const override = env.FRESHSERVICE_BASE_URL ?? file.baseUrl;
   const derived = subdomain ? `https://${subdomain}.freshservice.com` : "";
   const baseUrl = override ? String(override).replace(/\/+$/, "") : derived;
   if (!baseUrl) {
     throw new Error(
-      "no Freshservice base URL: set subdomain (or base-url) in fsvc config, or FSVC_SUBDOMAIN/FSVC_BASE_URL",
+      "no Freshservice base URL: set FRESHSERVICE_SUBDOMAIN (or FRESHSERVICE_BASE_URL), or subdomain/baseUrl in freshservice.json",
     );
   }
   if (!session) {
-    throw new Error(
-      "no Freshservice session: set itildesk-session in fsvc config, or FSVC_ITILDESK_SESSION",
-    );
+    throw new Error("no Freshservice session: set FRESHSERVICE_SESSION, or session in freshservice.json");
   }
   return { baseUrl, session };
 }
@@ -170,14 +223,18 @@ export function makeFreshserviceGet({ baseUrl, session, fetchImpl = fetch }) {
 }
 
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-// Ordered: international (+CC), parenthesised, NANP 3-3-4, bare long runs,
-// then 0-prefixed national numbers. Deliberately does not match ISO dates
-// (2026-08-01) or short ticket/reference ids.
+// Ordered: international (+CC), parenthesised, NANP 3-3-4, then 0-prefixed
+// national numbers.
+//
+// Deliberately does NOT include a bare `\d{10,15}` rule: Freshservice ids
+// (ticket/requester/attachment) and signed-URL params such as `Expires=` are
+// long digit runs, and redacting them corrupted attachment URLs and made
+// requester ids render as "[redacted-phone]". Trade-off: a phone written with
+// no separators and no leading + or 0 is not redacted.
 const PHONE_PATTERNS = [
   /\+\d[\d \t().-]{5,}\d/g,
   /\(\d{3}\)[ .-]?\d{3}[ .-]\d{4}/g,
   /\b\d{3}[ .-]\d{3}[ .-]\d{4}\b/g,
-  /\b\d{10,15}\b/g,
   /\b0\d{1,3}[ .-]\d{3,4}[ .-]?\d{3,4}\b/g,
   /\b0\d{9,10}\b/g,
 ];

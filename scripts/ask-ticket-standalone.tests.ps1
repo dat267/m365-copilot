@@ -76,6 +76,21 @@ Assert-True "render urgency name" ($md.Contains("Urgency    : Low"))
 Assert-True "render conversation" ($md.Contains("### 2100 (incoming, 2026-08-01T10:30:00Z)"))
 Assert-True "render body, html stripped" ($md.Contains("Please fix") -and -not $md.Contains("<p>"))
 
+# --- native base64url JWT decode ------------------------------------------
+# Encode without Base64Url so this test also runs on .NET 8 / pwsh 7.4.
+$jwtPayload = [System.Convert]::ToBase64String(
+    [System.Text.Encoding]::UTF8.GetBytes('{"oid":"abc","tid":"xyz"}')).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+$claims = ConvertFrom-JwtPayload -Token "header.$jwtPayload.sig"
+Assert-StrEqual "jwt oid" "abc" $claims.oid
+Assert-StrEqual "jwt tid" "xyz" $claims.tid
+
+# --- native field access ---------------------------------------------------
+$obj = [pscustomobject]@{ a = 1; nested = [pscustomobject]@{ name = "x" } }
+Assert-True "field present" ((Get-FieldRaw -Object $obj -Key "a") -eq 1)
+Assert-True "field missing is null" ($null -eq (Get-FieldRaw -Object $obj -Key "nope"))
+Assert-StrEqual "nested value" "x" (Get-FieldValue -Object $obj.nested -Key "name")
+Assert-StrEqual "missing value empty" "" (Get-FieldValue -Object $obj -Key "nope")
+
 if ($script:Failures -gt 0) { Write-Host "$($script:Failures) PowerShell test(s) failed"; exit 1 }
 Write-Host "all PowerShell tests passed"
 exit 0

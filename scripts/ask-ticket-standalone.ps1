@@ -81,6 +81,10 @@ $CodeInterpreter = @(
 $StatusNames = @{ 2 = "Open"; 3 = "Pending"; 4 = "Resolved"; 5 = "Closed" }
 $PriorityNames = @{ 1 = "Low"; 2 = "Medium"; 3 = "High"; 4 = "Urgent" }
 $UrgencyImpactNames = @{ 1 = "Low"; 2 = "Medium"; 3 = "High" }
+$NameMaps = @{
+    urgency = $UrgencyImpactNames; impact = $UrgencyImpactNames
+    priority = $PriorityNames; status = $StatusNames
+}
 $MetaFields = @(
     @{ Label = "Status"; Key = "status"; NameKey = "status_name" },
     @{ Label = "Priority"; Key = "priority"; NameKey = "priority_name" },
@@ -100,20 +104,19 @@ $MetaFields = @(
 function Get-FieldRaw {
     param($Object, [string]$Key)
     if ($null -eq $Object -or -not $Key) { return $null }
-    if (@($Object.PSObject.Properties.Name) -notcontains $Key) { return $null }
-    return $Object.$Key
+    $property = $Object.PSObject.Properties[$Key]
+    if ($null -eq $property) { return $null }
+    return $property.Value
 }
 
 function Get-FieldValue {
     param($Object, [string]$Key)
-    if ($null -eq $Object -or -not $Key) { return "" }
-    if (@($Object.PSObject.Properties.Name) -notcontains $Key) { return "" }
-    $v = $Object.$Key
-    if ($null -eq $v) { return "" }
-    if ($v -is [System.Management.Automation.PSCustomObject] -or $v -is [System.Collections.IDictionary]) {
-        return ($v | ConvertTo-Json -Compress -Depth 10)
+    $value = Get-FieldRaw -Object $Object -Key $Key
+    if ($null -eq $value) { return "" }
+    if ($value -is [System.Management.Automation.PSCustomObject] -or $value -is [System.Collections.IDictionary]) {
+        return ($value | ConvertTo-Json -Compress -Depth 10)
     }
-    return [string]$v
+    return [string]$value
 }
 
 # Strips HTML tags (block closings -> newlines) and decodes entities.
@@ -129,13 +132,10 @@ function ConvertTo-PlainText {
 
 function Get-MappedName {
     param([string]$Key, [string]$Value)
-    if ($Value -notmatch '^\d+$') { return $Value }
-    $n = [int]$Value
-    switch ($Key) {
-        "urgency" { if ($UrgencyImpactNames.ContainsKey($n)) { return $UrgencyImpactNames[$n] } }
-        "impact" { if ($UrgencyImpactNames.ContainsKey($n)) { return $UrgencyImpactNames[$n] } }
-        "priority" { if ($PriorityNames.ContainsKey($n)) { return $PriorityNames[$n] } }
-        "status" { if ($StatusNames.ContainsKey($n)) { return $StatusNames[$n] } }
+    $map = $NameMaps[$Key]
+    if ($map -and $Value -match '^\d+$') {
+        $number = [int]$Value
+        if ($map.ContainsKey($number)) { return $map[$number] }
     }
     return $Value
 }
@@ -271,16 +271,15 @@ function Get-TokenFile {
 
 function Read-TokenFile {
     $path = Get-TokenFile
-    if (-not (Test-Path $path)) { return $null }
-    try { return (Get-Content -Raw $path | ConvertFrom-Json) } catch { return $null }
+    if (-not [System.IO.File]::Exists($path)) { return $null }
+    try { return ([System.IO.File]::ReadAllText($path) | ConvertFrom-Json) } catch { return $null }
 }
 
 function Write-TokenFile {
     param($Token)
     $path = Get-TokenFile
-    $dir = Split-Path -Parent $path
-    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
-    $Token | ConvertTo-Json | Set-Content -Path $path -Encoding utf8
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $path)) | Out-Null
+    [System.IO.File]::WriteAllText($path, ($Token | ConvertTo-Json))
 }
 
 function Invoke-RefreshTokenGrant {
@@ -326,12 +325,19 @@ function Get-M365AccessToken {
 
 function ConvertFrom-JwtPayload {
     param([string]$Token)
-    $payload = $Token.Split('.')[1].Replace('-', '+').Replace('_', '/')
-    switch ($payload.Length % 4) {
-        2 { $payload += "==" }
-        3 { $payload += "=" }
+    $payload = $Token.Split('.')[1]
+    if ([type]::GetType("System.Buffers.Text.Base64Url")) {
+        # Native base64url (no padding) on .NET 9+; falls back below on older.
+        $bytes = [System.Buffers.Text.Base64Url]::DecodeFromChars($payload)
+    } else {
+        $base64 = $payload.Replace('-', '+').Replace('_', '/')
+        switch ($base64.Length % 4) {
+            2 { $base64 += "==" }
+            3 { $base64 += "=" }
+        }
+        $bytes = [System.Convert]::FromBase64String($base64)
     }
-    return ([System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json)
+    return ([System.Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json)
 }
 
 # ===========================================================================
@@ -347,14 +353,14 @@ function Send-WsText {
 
 function Receive-WsMessage {
     param($Ws, [byte[]]$Buffer, [System.Threading.CancellationToken]$Token)
-    $sb = [System.Text.StringBuilder]::new()
+    $stream = [System.IO.MemoryStream]::new()
     do {
         $segment = [System.ArraySegment[byte]]::new($Buffer)
         $result = $Ws.ReceiveAsync($segment, $Token).GetAwaiter().GetResult()
         if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) { return $null }
-        [void]$sb.Append([System.Text.Encoding]::UTF8.GetString($Buffer, 0, $result.Count))
+        $stream.Write($Buffer, 0, $result.Count)
     } while (-not $result.EndOfMessage)
-    return $sb.ToString()
+    return [System.Text.Encoding]::UTF8.GetString($stream.ToArray())
 }
 
 function Add-StreamText {

@@ -118,6 +118,20 @@ Assert-True "att size" ($att.Size -eq 279272)
 Assert-StrEqual "att url" "https://x/a.jpeg" $att.Url
 Assert-StrEqual "att source" "ticket" $att.Source
 Assert-True "att is image" $att.IsImage
+
+# Real captured shape also carries `canonical_url`/`canonical_path`. Prefer the
+# signed (cookie-free) `attachment_url`; fall back to `canonical_url` when absent.
+$real = ConvertTo-NormalizedAttachment -Raw ([pscustomobject]@{
+    id = 21113132612; name = "Adhar card.pdf"; content_type = "application/pdf"; size = 192838
+    attachment_url = "https://x.attachments.freshservice.com/data/a.pdf?Signature=abc"
+    canonical_url = "https://x/helpdesk/attachments/21113132612"
+}) -Source "ticket"
+Assert-StrEqual "att prefers signed url" "https://x.attachments.freshservice.com/data/a.pdf?Signature=abc" $real.Url
+$canonOnly = ConvertTo-NormalizedAttachment -Raw ([pscustomobject]@{
+    name = "Adhar card.pdf"; content_type = "application/pdf"
+    canonical_url = "https://x/helpdesk/attachments/21113132612"
+}) -Source "ticket"
+Assert-StrEqual "att canonical url fallback" "https://x/helpdesk/attachments/21113132612" $canonOnly.Url
 $logAtt = ConvertTo-NormalizedAttachment -Raw ([pscustomobject]@{ name = "trace.log"; content_type = "text/plain"; size = 10 }) -Source "conversation 1"
 Assert-True "log not image" (-not $logAtt.IsImage)
 

@@ -281,6 +281,10 @@ function ConvertTo-NormalizedAttachment {
     $sizeRaw = Get-FieldRaw -Object $Raw -Key "size"
     $url = Get-FieldValue -Object $Raw -Key "attachment_url"
     if (-not $url) { $url = Get-FieldValue -Object $Raw -Key "url" }
+    if (-not $url) { $url = Get-FieldValue -Object $Raw -Key "download_url" }
+    # `canonical_url` is the non-signed, session-authenticated URL; only used as a
+    # fallback because we download without the Freshservice cookie.
+    if (-not $url) { $url = Get-FieldValue -Object $Raw -Key "canonical_url" }
     $ext = Get-Extension -Name $name
     return [pscustomobject]@{
         Name        = $name
@@ -485,7 +489,12 @@ function Invoke-FSGet {
 
 function Get-TicketData {
     param([int]$Id)
-    $ticketResp = Invoke-FSGet -Path "tickets/$Id"
+    # The private API only returns the `attachments` array when an include is
+    # present; this mirrors the web client's ticket request (verified against a
+    # live capture). Without it `attachments` is absent and nothing uploads.
+    $ticketResp = Invoke-FSGet -Path "tickets/$Id" -Query @{
+        include = "requester,stats,phone,feedback,ticket_status"
+    }
     $conversations = @()
     $page = 1
     do {

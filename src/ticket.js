@@ -23,14 +23,19 @@ export function normalizeAttachment(raw, source) {
     name: a.name ?? a.filename ?? a.file_name ?? "",
     contentType: a.content_type ?? a.contentType ?? a.mime_type ?? "",
     size: a.size ?? a.file_size ?? a.content_length ?? null,
-    url: a.attachment_url ?? a.url ?? a.download_url ?? "",
+    url: a.attachment_url ?? a.url ?? a.download_url ?? a.canonical_url ?? "",
     source,
   };
 }
 
 /** Fetches a ticket and all of its conversations. `get(path, query)` is the
  *  injected HTTP boundary; it returns parsed JSON. */export async function fetchTicket(id, get) {
-  const { ticket } = await get(`tickets/${id}`);
+  // The private API only returns the `attachments` array on a ticket GET that
+  // carries the web client's `include` list; without it the ticket comes back
+  // with no attachments key at all. Verified against a live capture.
+  const { ticket } = await get(`tickets/${id}`, {
+    include: "requester,stats,phone,feedback,ticket_status",
+  });
   const conversations = [];
   const maxPages = 1000; // safety cap
   for (let page = 1; page <= maxPages; page++) {

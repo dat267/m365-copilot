@@ -55,6 +55,19 @@ test("normalizeAttachment tolerates alternate field spellings", () => {
   assert.equal(a.source, "conversation 42");
 });
 
+test("normalizeAttachment falls back to canonical_url", () => {
+  // The real private-API object carries both a signed `attachment_url` and a
+  // `canonical_url`; the signed one wins, but canonical is the fallback.
+  const signed = normalizeAttachment(
+    { name: "a.pdf", attachment_url: "https://signed", canonical_url: "https://canon" },
+    "ticket",
+  );
+  const canonOnly = normalizeAttachment({ name: "a.pdf", canonical_url: "https://canon" }, "ticket");
+
+  assert.equal(signed.url, "https://signed");
+  assert.equal(canonOnly.url, "https://canon");
+});
+
 test("fetchTicket fetches the ticket and its conversations", async () => {
   const calls = [];
   const get = async (path, query) => {
@@ -75,6 +88,23 @@ test("fetchTicket fetches the ticket and its conversations", async () => {
     path: "tickets/10100/conversations",
     query: { per_page: "100", order_by: "created_at", order_type: "asc", page: "1" },
   });
+});
+
+test("fetchTicket asks the private API to include attachment details", async () => {
+  // The private API returned the `attachments` array only for a ticket GET that
+  // carried the web client's `include` list; a bare GET omits it (verified
+  // against a live capture), so no images/files were ever detected.
+  const calls = [];
+  const get = async (path, query) => {
+    calls.push({ path, query });
+    if (path === "tickets/10100") return { ticket: { id: 10100 } };
+    return { conversations: [], meta: { has_next: false } };
+  };
+
+  await fetchTicket(10100, get);
+
+  assert.equal(calls[0].path, "tickets/10100");
+  assert.equal(calls[0].query?.include, "requester,stats,phone,feedback,ticket_status");
 });
 
 test("fetchTicket collects attachments from the ticket, conversations and linked attachments", async () => {

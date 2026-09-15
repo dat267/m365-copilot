@@ -192,7 +192,7 @@ test("renderTicket notes the absence of attachments", () => {
 
 test("resolveConfig builds the base URL from env subdomain and session", () => {
   const env = { FRESHSERVICE_SUBDOMAIN: "acme", FRESHSERVICE_SESSION: "sess" };
-  const io = { defaultPath: "/home/u/.config/m365-ask/freshservice.json", exists: () => false, readFile: () => "" };
+  const io = { defaultPath: "/home/u/.config/m365-copilot/freshservice.json", exists: () => false, readFile: () => "" };
 
   assert.deepEqual(resolveConfig(env, io), {
     baseUrl: "https://acme.freshservice.com",
@@ -203,7 +203,7 @@ test("resolveConfig builds the base URL from env subdomain and session", () => {
 test("resolveConfig falls back to the config file named by M365_FRESHSERVICE_CONFIG", () => {
   const env = { M365_FRESHSERVICE_CONFIG: "/tmp/freshservice.json" };
   const io = {
-    defaultPath: "/home/u/.config/m365-ask/freshservice.json",
+    defaultPath: "/home/u/.config/m365-copilot/freshservice.json",
     exists: (p) => p === "/tmp/freshservice.json",
     readFile: () => JSON.stringify({ subdomain: "fileco", session: "filesess" }),
   };
@@ -241,8 +241,8 @@ test("resolveConfig uses baseUrl and trims a trailing slash", () => {
 
 test("resolveConfig reads the default config path when there is no override", () => {
   const io = {
-    defaultPath: "/home/u/.config/m365-ask/freshservice.json",
-    exists: (p) => p === "/home/u/.config/m365-ask/freshservice.json",
+    defaultPath: "/home/u/.config/m365-copilot/freshservice.json",
+    exists: (p) => p === "/home/u/.config/m365-copilot/freshservice.json",
     readFile: () => JSON.stringify({ subdomain: "homeco", session: "homesess" }),
   };
 
@@ -254,8 +254,8 @@ test("resolveConfig reads the default config path when there is no override", ()
 
 test("resolveConfig prefers a local freshservice.json over the default path", () => {
   const io = {
-    defaultPath: "/home/u/.config/m365-ask/freshservice.json",
-    exists: (p) => p === "freshservice.json" || p === "/home/u/.config/m365-ask/freshservice.json",
+    defaultPath: "/home/u/.config/m365-copilot/freshservice.json",
+    exists: (p) => p === "freshservice.json" || p === "/home/u/.config/m365-copilot/freshservice.json",
     readFile: (p) =>
       JSON.stringify(
         p === "freshservice.json"
@@ -286,7 +286,7 @@ test("resolveConfig throws when no base URL can be determined", () => {
 
 test("resolveConfig does not read the fsvc config", () => {
   const io = {
-    defaultPath: "/home/u/.config/m365-ask/freshservice.json",
+    defaultPath: "/home/u/.config/m365-copilot/freshservice.json",
     exists: () => false,
     readFile: () => {
       throw new Error("should not read any config file");

@@ -14,7 +14,7 @@
 // Credentials/config are this repo's own — NOT fsvc's:
 //   env:  FRESHSERVICE_SUBDOMAIN, FRESHSERVICE_SESSION, FRESHSERVICE_BASE_URL
 //   file: $M365_FRESHSERVICE_CONFIG, else ./freshservice.json,
-//         else ~/.config/m365-ask/freshservice.json
+//         else ~/.config/m365-copilot/freshservice.json
 //   keys: { "subdomain": "acme", "session": "...", "baseUrl": "" }
 //
 // The session value is the browser's `_itildesk_session` cookie.
@@ -51,7 +51,7 @@ if (!instruction) {
 
 const configHome = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
 const { baseUrl, session: freshserviceSession } = resolveConfig(process.env, {
-  defaultPath: join(configHome, "m365-ask", "freshservice.json"),
+  defaultPath: join(configHome, "m365-copilot", "freshservice.json"),
   exists: existsSync,
   readFile: (p) => readFileSync(p, "utf8"),
 });

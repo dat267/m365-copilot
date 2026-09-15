@@ -34,7 +34,7 @@ node cli.js --temporary "..."
 ```
 
 First run opens a **visible browser** — sign in to Microsoft 365 once. The token
-cache + browser profile live in `~/.config/m365-ask/`, so later runs are silent.
+cache + browser profile live in `~/.config/m365-copilot/`, so later runs are silent.
 
 ### No Playwright? Use a copied token
 
@@ -70,7 +70,7 @@ fresh access tokens indefinitely and rotates it automatically.
 M365_REFRESH_TOKEN=<token> node cli.js "hi"
 ```
 
-It's persisted to `~/.config/m365-ask/token.json` (with the **rotated** token),
+It's persisted to `~/.config/m365-copilot/token.json` (with the **rotated** token),
 so later runs need no env var. AAD rotates refresh tokens on every exchange —
 keep one store, or you'll hold a stale one.
 
@@ -97,7 +97,7 @@ for await (const delta of stream) process.stdout.write(delta);
 console.log(await ask("What is my name?", { session })); // -> Ada
 ```
 
-`M365Session` persists its `conversationId` (`~/.config/m365-ask/session.json`)
+`M365Session` persists its `conversationId` (`~/.config/m365-copilot/session.json`)
 and resumes it on later runs, so separate invocations reuse one M365
 conversation instead of burning a new one. Start fresh with
 `session.newConversation()` or `new M365Session({ fresh: true })`; set
@@ -183,7 +183,7 @@ or a JSON file (env wins over file):
 ```
 
 Looked up at `$M365_FRESHSERVICE_CONFIG`, else `./freshservice.json`, else
-`~/.config/m365-ask/freshservice.json`.
+`~/.config/m365-copilot/freshservice.json`.
 
 ## Ticket attachments
 
@@ -289,7 +289,7 @@ pwsh -File scripts/ask-ticket-standalone.ps1 -Persist "..." 24613   # memory ON
 carries `disableMemory=1`, so M365 keeps no long-term memory of it and it never
 appears in your history. `-Persist` turns memory back on. `-ConversationId`
 targets a specific conversation and `-LastConversation` reuses the id the script
-remembered from the previous run (`~/.config/m365-ask/last-ticket-conversation.json`).
+remembered from the previous run (`~/.config/m365-copilot/last-ticket-conversation.json`).
 Every run records the id it used, so `-LastConversation` works next time; note
 that resuming is only meaningful for a conversation that was **not** temporary.
 

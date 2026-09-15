@@ -39,7 +39,7 @@ const SCOPES = [
 // AADSTS65002); `.default` returns Files.ReadWrite.All among others.
 const GRAPH_SCOPES = ["https://graph.microsoft.com/.default"];
 
-const CONFIG_DIR = process.env.M365_CONFIG_DIR || join(homedir(), ".config", "m365-ask");
+const CONFIG_DIR = process.env.M365_CONFIG_DIR || join(homedir(), ".config", "m365-copilot");
 const CACHE_FILE = process.env.M365_CACHE_FILE || join(CONFIG_DIR, "msal-cache.json");
 const BROWSER_PROFILE_DIR = process.env.M365_BROWSER_PROFILE || join(CONFIG_DIR, "browser-profile");
 // Raw refresh-token store (access token + rotated refresh token). See the
@@ -153,8 +153,8 @@ export async function loginInteractive() {
   });
 
   try {
-    console.error("[m365-ask] A browser window has opened — complete Microsoft sign-in there.");
-    console.error("[m365-ask] Waiting up to 10 minutes...");
+    console.error("[m365-copilot] A browser window has opened — complete Microsoft sign-in there.");
+    console.error("[m365-copilot] Waiting up to 10 minutes...");
     await page.goto(authUrl, { waitUntil: "domcontentloaded" });
 
     let timer;

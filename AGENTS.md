@@ -72,7 +72,7 @@ generation, no automated password/TOTP login.
 | `src/prompt.js` | CLI context/prompt assembly (`--context`, `--new`, `--temporary`), no I/O |
 | `src/ticket.js` | Freshservice ticket fetch/render + `redactPII` (used by `scripts/ask-ticket.js`); repo-native config (`FRESHSERVICE_*` / `freshservice.json`) — **not** fsvc |
 | `src/index.js` | Public API: `ask()` (one-shot) and `M365Session` (multi-turn, handles auth + reconnect) |
-| `src/log.js` | Optional debug logging (`M365_DEBUG=1` → `~/.config/m365-ask/debug.log`) |
+| `src/log.js` | Optional debug logging (`M365_DEBUG=1` → `~/.config/m365-copilot/debug.log`) |
 | `examples/` | Runnable examples |
 | `scripts/` | `ask-ticket.js` (repo imports), `ask-ticket-standalone.ps1` + `ask-ticket-standalone.tests.ps1` (PowerShell 7+, self-contained; multi-message long-ticket splitting, temporary chat by default, uses the OS cert store) |
 
@@ -95,7 +95,7 @@ only meaningfully testable against the live API — verify changes end-to-end
 
 ## Running against real M365
 
-Config/cache live in **`~/.config/m365-ask/`** (`msal-cache.json`,
+Config/cache live in **`~/.config/m365-copilot/`** (`msal-cache.json`,
 `browser-profile/`, `session.json`) — deliberately separate from the proxy's
 `~/.config/opencode-m365/`. Override with `M365_CONFIG_DIR`,
 `M365_CACHE_FILE`, `M365_BROWSER_PROFILE`.
@@ -106,7 +106,7 @@ Config/cache live in **`~/.config/m365-ask/`** (`msal-cache.json`,
   MSAL silent refresh → interactive browser. So you can run this entirely on a
   browser-copied token and never install Chromium. See README "No Playwright?".
 - **Refresh tokens ROTATE.** AAD returns a new one on every grant; `auth.js`
-  persists it to `~/.config/m365-ask/token.json`. Never share one refresh token
+  persists it to `~/.config/m365-copilot/token.json`. Never share one refresh token
   across two stores/processes — the stale copy stops working. (The old token
   keeps a short grace period, so a single extra use won't immediately break.)
 - **Interactive auth** (when reached) opens a *visible* browser; sign in once.
@@ -114,7 +114,7 @@ Config/cache live in **`~/.config/m365-ask/`** (`msal-cache.json`,
   password/TOTP-automation path here by design.
 - **To test without a browser**, either set `M365_REFRESH_TOKEN` from the proxy's
   cache, or copy `~/.config/opencode-m365/msal-cache.json` to
-  `~/.config/m365-ask/msal-cache.json` (MSAL silent path).
+  `~/.config/m365-copilot/msal-cache.json` (MSAL silent path).
 
 Verify end-to-end:
 

@@ -21,7 +21,7 @@
 #   (default)         new conversation id, temporary
 #   -ConversationId   talk to that specific conversation
 #   -LastConversation reuse the id remembered from the previous run
-#                     (<M365_CONFIG_DIR|~/.config/m365-ask>/last-ticket-conversation.json)
+#                     (<M365_CONFIG_DIR|~/.config/m365-copilot>/last-ticket-conversation.json)
 #
 # The id used is always recorded, so -LastConversation works next time. Note
 # that resuming is only meaningful for a conversation that was NOT temporary.
@@ -114,7 +114,7 @@ $Config = [ordered]@{
     # appears in your chat history. Pass -Persist to turn memory back on.
     Temporary     = $true
     # Where -LastConversation remembers the previous conversation id.
-    # Default: <M365_CONFIG_DIR | ~/.config/m365-ask>/last-ticket-conversation.json
+    # Default: <M365_CONFIG_DIR | ~/.config/m365-copilot>/last-ticket-conversation.json
     StateFile     = ""
 }
 
@@ -720,7 +720,7 @@ function New-PromptText {
 # ===========================================================================
 function Get-TokenFile {
     if ($env:M365_TOKEN_FILE) { return $env:M365_TOKEN_FILE }
-    $dir = if ($env:M365_CONFIG_DIR) { $env:M365_CONFIG_DIR } else { Join-Path $HOME ".config/m365-ask" }
+    $dir = if ($env:M365_CONFIG_DIR) { $env:M365_CONFIG_DIR } else { Join-Path $HOME ".config/m365-copilot" }
     return Join-Path $dir "token.json"
 }
 
@@ -800,7 +800,7 @@ function ConvertFrom-JwtPayload {
 # ===========================================================================
 function Get-StatePath {
     if ($Config.StateFile) { return $Config.StateFile }
-    $dir = if ($env:M365_CONFIG_DIR) { $env:M365_CONFIG_DIR } else { Join-Path $HOME ".config/m365-ask" }
+    $dir = if ($env:M365_CONFIG_DIR) { $env:M365_CONFIG_DIR } else { Join-Path $HOME ".config/m365-copilot" }
     return Join-Path $dir "last-ticket-conversation.json"
 }
 

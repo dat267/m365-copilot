@@ -41,7 +41,7 @@ Env:
   M365_ACCESS_TOKEN     use a token copied from the browser (no browser needed, ~1h)
   M365_REFRESH_TOKEN    durable browser-copied token; persisted + auto-rotated
   M365_CLIENT_ID        override the first-party client id for the grant
-  M365_DEBUG=1          log to ~/.config/m365-ask/debug.log
+  M365_DEBUG=1          log to ~/.config/m365-copilot/debug.log
   M365_INSECURE=1       skip TLS verification (corporate MITM proxy)
   NODE_EXTRA_CA_CERTS   path to your corporate root CA (preferred)
   M365_NO_CODE_INTERPRETER=1  disable M365's server-side Python sandbox`);

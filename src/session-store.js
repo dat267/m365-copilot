@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
-const CONFIG_DIR = process.env.M365_CONFIG_DIR || join(homedir(), ".config", "m365-ask");
+const CONFIG_DIR = process.env.M365_CONFIG_DIR || join(homedir(), ".config", "m365-copilot");
 export const SESSION_FILE = process.env.M365_SESSION_FILE || join(CONFIG_DIR, "session.json");
 
 /** Picks the ids to use: explicit > persisted > new. `fresh` always mints new. */

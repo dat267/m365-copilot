@@ -257,8 +257,8 @@ the web client by attaching mixtures:
 | 3 images + any file | **3** (file refused) |
 
 So batch them **together**, never three images plus three files. `MAX_IMAGES_PER_MESSAGE`
-is the shared cap; the PowerShell script calls it `MaxAttachmentsPerMessage`, and
-`planAttachmentBatches()` packs a mixed list into batches of at most 3.
+is the shared cap, enforced by `planImageBatches()`/`planAttachmentBatches()`. The
+standalone PowerShell script does not upload images or files — see below.
 
 ### Standalone PowerShell, and long tickets
 
@@ -271,6 +271,10 @@ It does **not truncate** a long ticket. It renders the ticket as ordered section
 them into as many messages as the per-message budget allows, and sends them as
 successive turns of **one** M365 conversation, so the model holds the whole
 ticket when it answers. Intermediate turns ask for `ACK` to keep replies cheap.
+
+Attachments are **text only** here: every attachment is listed in the manifest, and
+text-bearing ones (logs, csv, json, …) are inlined verbatim. Images and other
+binaries are named but never uploaded (the Node API still supports uploads).
 
 ```sh
 # ask about a ticket (long ones split automatically); temporary chat by default

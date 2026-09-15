@@ -74,7 +74,7 @@ generation, no automated password/TOTP login.
 | `src/index.js` | Public API: `ask()` (one-shot) and `M365Session` (multi-turn, handles auth + reconnect) |
 | `src/log.js` | Optional debug logging (`M365_DEBUG=1` → `~/.config/m365-copilot/debug.log`) |
 | `examples/` | Runnable examples |
-| `scripts/` | `ask-ticket.js` (repo imports), `ask-ticket-standalone.ps1` + `ask-ticket-standalone.tests.ps1` (PowerShell 7+, self-contained; multi-message long-ticket splitting, temporary chat by default, uses the OS cert store) |
+| `scripts/` | `ask-ticket.js` (repo imports), `ask-ticket-standalone.ps1` + `ask-ticket-standalone.tests.ps1` (PowerShell 7+, self-contained; multi-message long-ticket splitting, temporary chat by default, uses the OS cert store; attachments are **text only** — manifest + inlined text, no uploads) |
 
 ESM, `.js`-suffixed relative imports. No TypeScript, no bundler.
 

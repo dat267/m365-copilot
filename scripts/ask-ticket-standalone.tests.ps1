@@ -117,7 +117,6 @@ Assert-StrEqual "att type" "image/jpeg" $att.ContentType
 Assert-True "att size" ($att.Size -eq 279272)
 Assert-StrEqual "att url" "https://x/a.jpeg" $att.Url
 Assert-StrEqual "att source" "ticket" $att.Source
-Assert-True "att is image" $att.IsImage
 
 # Real captured shape also carries `canonical_url`/`canonical_path`. Prefer the
 # signed (cookie-free) `attachment_url`; fall back to `canonical_url` when absent.
@@ -132,8 +131,6 @@ $canonOnly = ConvertTo-NormalizedAttachment -Raw ([pscustomobject]@{
     canonical_url = "https://x/helpdesk/attachments/21113132612"
 }) -Source "ticket"
 Assert-StrEqual "att canonical url fallback" "https://x/helpdesk/attachments/21113132612" $canonOnly.Url
-$logAtt = ConvertTo-NormalizedAttachment -Raw ([pscustomobject]@{ name = "trace.log"; content_type = "text/plain"; size = 10 }) -Source "conversation 1"
-Assert-True "log not image" (-not $logAtt.IsImage)
 
 # --- attachment plan (size + count limits) --------------------------------
 $atts = @(
@@ -145,7 +142,6 @@ $atts = @(
 # NB: do not name these $plan — the script's [switch]$Plan parameter creates a
 # type-constrained $Plan variable that dot-sourcing shares with this file.
 $attPlan = Get-AttachmentPlan -Attachments $atts -MaxInlineFileBytes 1000 -MaxInlineFiles 20 -TextExtensions @(".log")
-Assert-True "plan counts images" ($attPlan.ImageCount -eq 1)
 Assert-True "plan inlines small text" ($attPlan.Inline.Count -eq 1 -and $attPlan.Inline[0].Name -eq "b.log")
 Assert-True "plan lists oversize + binary" (`
     ($attPlan.ListedOnly | ForEach-Object { $_.Name }) -contains "huge.log" -and `
@@ -222,61 +218,10 @@ Assert-True "temporary is the default" ((New-ChatHubUrl -Oid "O" -Tid "T" -Sessi
 # --- default config --------------------------------------------------------
 Assert-True "temporary chat is on by default" ($Config.Temporary -eq $true)
 
-# --- image attachments -----------------------------------------------------
-$uploads = @([pscustomobject]@{ docId = "0-ea-abc"; fileName = "probe-42.png"; fileType = ".png" })
-$ann = @(New-ImageAnnotations -Uploads $uploads)
-Assert-True "annotation count" ($ann.Count -eq 1)
-Assert-StrEqual "annotation id" "0-ea-abc" $ann[0].id
-Assert-StrEqual "annotation type" "ImageFile" $ann[0].messageAnnotationType
-Assert-StrEqual "annotation fileType" "png" $ann[0].messageAnnotationMetadata.fileType
-Assert-StrEqual "annotation fileName" "probe-42.png" $ann[0].messageAnnotationMetadata.fileName
-Assert-StrEqual "annotation @type" "File" $ann[0].messageAnnotationMetadata.'@type'
-Assert-StrEqual "annotation fileType strips dot" "jpeg" (@(New-ImageAnnotations -Uploads @([pscustomobject]@{ docId = "d"; fileType = ".jpeg" })))[0].messageAnnotationMetadata.fileType
-Assert-True "annotation empty for none" ((New-ImageAnnotations -Uploads @()).Count -eq 0)
-Assert-True "annotation skips docId-less" ((New-ImageAnnotations -Uploads @([pscustomobject]@{ fileName = "x.png" })).Count -eq 0)
-
-$frAtt = New-ChatFrame -RequestId "R" -SessionId "S" -Text "hi" -IsFirstTurn $true -Attachments $uploads | ConvertFrom-Json
-Assert-True "frame carries annotation" ($frAtt.arguments[0].message.messageAnnotations.Count -eq 1)
-Assert-True "frame has image options" ($frAtt.arguments[0].optionsSets -contains "gptvnorm2048")
+# a plain frame carries no annotations (text only)
 $frPlain = New-ChatFrame -RequestId "R" -SessionId "S" -Text "hi" -IsFirstTurn $true | ConvertFrom-Json
-Assert-True "frame omits annotations when none" ($null -eq $frPlain.arguments[0].message.messageAnnotations)
-Assert-True "frame omits image options when none" (-not ($frPlain.arguments[0].optionsSets -contains "gptvnorm2048"))
-
-# --- image budget (ties image count to the turn budget) --------------------
-$b = Get-ImageBudget -MaxMessages 60 -ContextTurns 1 -MaxPerMessage 3 -ImageCount 4
-Assert-True "budget: plenty of room keeps all" ($b.Allowed -eq 4 -and -not $b.Capped)
-$b = Get-ImageBudget -MaxMessages 3 -ContextTurns 1 -MaxPerMessage 3 -ImageCount 100
-Assert-True "budget: caps when tight" ($b.Allowed -eq 9 -and $b.Capped)
-$b = Get-ImageBudget -MaxMessages 1 -ContextTurns 1 -MaxPerMessage 3 -ImageCount 100
-Assert-True "budget: one turn still allows one batch" ($b.Allowed -eq 3)
-$b = Get-ImageBudget -MaxMessages 60 -ContextTurns 60 -MaxPerMessage 3 -ImageCount 100
-Assert-True "budget: full context still allows one batch" ($b.Allowed -eq 3)
-$b = Get-ImageBudget -MaxMessages 0 -ContextTurns 1 -MaxPerMessage 3 -ImageCount 100
-Assert-True "budget: no turns means no images" ($b.Allowed -eq 0)
-$b = Get-ImageBudget -MaxMessages 1 -ContextTurns 5 -MaxPerMessage 3 -ImageCount 100
-Assert-True "budget: context over budget means no images" ($b.Allowed -eq 0)
-$b = Get-ImageBudget -MaxMessages 60 -ContextTurns 1 -MaxPerMessage 3 -ImageCount 0
-Assert-True "budget: zero images" ($b.Allowed -eq 0 -and -not $b.Capped)
-
-# --- file (LocalFile) annotations ------------------------------------------
-# Synthetic vector (no real tenant/sharepoint ids in the tests).
-$driveId = "b!ERERESIiMzNERFVVVVVVVaqqqqq7u8zM3d3u7u7u7u6ZmZmZiIh3d2ZmVVVVVVVV"
-$itemId = "01SYNTHETICITEMID0000000000000000"
-$expectSpo = "SPO_MTExMTExMTEtMjIyMi0zMzMzLTQ0NDQtNTU1NTU1NTU1NTU1LGFhYWFhYWFhLWJiYmItY2NjYy1kZGRkLWVlZWVlZWVlZWVlZSw5OTk5OTk5OS04ODg4LTc3NzctNjY2Ni01NTU1NTU1NTU1NTU_01SYNTHETICITEMID0000000000000000"
-Assert-StrEqual "spoId reproduces the captured id" $expectSpo (Get-SpoId -DriveId $driveId -ItemId $itemId)
-
-$fileUploads = @([pscustomobject]@{ driveId = $driveId; itemId = $itemId; fileName = "probe-file.txt"; webUrl = "https://sp/x.txt" })
-$fann = @(New-FileAnnotations -Uploads $fileUploads)
-Assert-True "file annotation count" ($fann.Count -eq 1)
-Assert-StrEqual "file annotation id" $expectSpo $fann[0].id
-Assert-StrEqual "file annotation text" "probe-file.txt" $fann[0].text
-Assert-StrEqual "file annotation url" "https://sp/x.txt" $fann[0].url
-Assert-StrEqual "file annotation type" "LocalFile" $fann[0].messageAnnotationType
-Assert-True "file annotation empty for none" ((New-FileAnnotations -Uploads @()).Count -eq 0)
-
-$bothFrame = New-ChatFrame -RequestId "R" -SessionId "S" -Text "hi" -IsFirstTurn $true -Attachments $uploads -FileAttachments $fileUploads | ConvertFrom-Json
-Assert-True "frame carries image + file" ($bothFrame.arguments[0].message.messageAnnotations.Count -eq 2)
-Assert-True "frame has a LocalFile entry" (($bothFrame.arguments[0].message.messageAnnotations | ForEach-Object { $_.messageAnnotationType }) -contains "LocalFile")
+Assert-True "frame omits annotations" ($null -eq $frPlain.arguments[0].message.messageAnnotations)
+Assert-True "frame omits image options" (-not ($frPlain.arguments[0].optionsSets -contains "gptvnorm2048"))
 
 if ($script:Failures -gt 0) { Write-Host "$($script:Failures) PowerShell test(s) failed"; exit 1 }
 Write-Host "all PowerShell tests passed"

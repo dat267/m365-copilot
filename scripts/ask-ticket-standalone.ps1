@@ -557,7 +557,17 @@ function ConvertTo-AttachmentSection {
 # ===========================================================================
 function Redact-PII {
     param([string]$Text)
-    $out = [regex]::Replace($Text, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[redacted-email]')
+    # Windows network-config (`ipconfig /all`) labels carry machine/org
+    # identifiers; redact the value while keeping the label.
+    $netLines = @(
+        @{ Pattern = '(?im)^(\s*Host Name[.\s]*:\s*)[^\r\n]*'; Replacement = '$1[redacted-host]' },
+        @{ Pattern = '(?im)^(\s*(?:Primary Dns Suffix|DNS Suffix Search List|Connection-specific DNS Suffix)[.\s]*:\s*)[^\r\n]*'; Replacement = '$1[redacted-domain]' },
+        @{ Pattern = '(?im)^(\s*DHCPv6 (?:Client DUID|IAID)[.\s]*:\s*)[^\r\n]*'; Replacement = '$1[redacted-id]' },
+        @{ Pattern = '(?im)^(\s*Tunnel adapter\s+)[^:\r\n]*:'; Replacement = '$1[redacted]:' }
+    )
+    $out = $Text
+    foreach ($r in $netLines) { $out = [regex]::Replace($out, $r.Pattern, $r.Replacement) }
+    $out = [regex]::Replace($out, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[redacted-email]')
     # MAC addresses (00-1A-2B-3C-4D-5E, 00:1a:2b:3c:4d:5e, 001a.2b3c.4d5e).
     $mac = '\b[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}\b|\b[0-9A-Fa-f]{4}(?:\.[0-9A-Fa-f]{4}){2}\b'
     $out = [regex]::Replace($out, $mac, '[redacted-mac]')

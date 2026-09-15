@@ -387,6 +387,29 @@ test("redactPII replaces phone numbers in common formats", () => {
   for (const [input, expected] of cases) assert.equal(redactPII(input), expected, input);
 });
 
+test("redactPII strips Windows network-config identifiers", () => {
+  const out = redactPII(
+    [
+      "Windows IP Configuration",
+      "   Host Name . . . . . . . . . . . . : DESKTOP-ABC123",
+      "   Primary Dns Suffix  . . . . . . . : corp.example.com",
+      "   DNS Suffix Search List. . . . . . : corp.example.com",
+      "   Connection-specific DNS Suffix  . : corp.example.com",
+      "   DHCPv6 Client DUID. . . . . . . . : 00-01-00-01-2A-BC-3D-4E-00-1A-2B-3C-4D-5E",
+      "   DHCPv6 IAID . . . . . . . . . . . : 123456789",
+      "Tunnel adapter isatap.corp.example.com:",
+    ].join("\n"),
+  );
+
+  assert.ok(!out.includes("DESKTOP-ABC123"), "host name removed");
+  assert.ok(!out.includes("corp.example.com"), "domains removed");
+  assert.ok(out.includes("Tunnel adapter [redacted]:"), "tunnel adapter name removed");
+  assert.ok(!out.includes("00-01-00-01-2A-BC-3D-4E"), "DUID removed");
+  assert.ok(out.includes("[redacted-host]"), "host marker present");
+  assert.equal((out.match(/\[redacted-domain\]/g) ?? []).length, 3, "every DNS suffix redacted");
+  assert.ok(out.includes("[redacted-id]"), "DHCPv6 id marker present");
+});
+
 test("redactPII replaces MAC addresses", () => {
   assert.equal(redactPII("physical 00-1A-2B-3C-4D-5E"), "physical [redacted-mac]");
   assert.equal(redactPII("physical 00:1a:2b:3c:4d:5e"), "physical [redacted-mac]");

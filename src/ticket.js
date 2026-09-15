@@ -253,6 +253,17 @@ const IPV4_RE = /(?<![\w.])(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[
 // groups), and the Cisco dotted form is unambiguous.
 const MAC_RE = /\b[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}\b|\b[0-9A-Fa-f]{4}(?:\.[0-9A-Fa-f]{4}){2}\b/g;
 
+// Values on Windows network-config lines (`ipconfig /all`) that are machine or
+// organisation identifiers. The filter that refuses these tickets keys on more
+// than IPs, so strip the host name, DNS suffixes/domains and DHCPv6 IDs too.
+// Anchored on the ipconfig label, so prose elsewhere is untouched.
+const NET_LINE_RULES = [
+  [/^(\s*Host Name[.\s]*:\s*)[^\r\n]*/gim, "$1[redacted-host]"],
+  [/^(\s*(?:Primary Dns Suffix|DNS Suffix Search List|Connection-specific DNS Suffix)[.\s]*:\s*)[^\r\n]*/gim, "$1[redacted-domain]"],
+  [/^(\s*DHCPv6 (?:Client DUID|IAID)[.\s]*:\s*)[^\r\n]*/gim, "$1[redacted-id]"],
+  [/^(\s*Tunnel adapter\s+)[^:\r\n]*:/gim, "$1[redacted]:"],
+];
+
 // IPv6: full 8-group and `::`-compressed forms only. Deliberately omits the
 // non-compressed shorthand, which would match HH:MM:SS times; the lookarounds
 // keep identifiers like `std::vector` intact. A match is redacted only when it
@@ -262,7 +273,9 @@ const IPV6_RE = /(?<![0-9A-Za-z:])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?
 /** Redacts email addresses, IP addresses and phone numbers so they are not
  *  sent to the model. */
 export function redactPII(text) {
-  let out = String(text ?? "").replace(EMAIL_RE, "[redacted-email]");
+  let out = String(text ?? "");
+  for (const [re, replacement] of NET_LINE_RULES) out = out.replace(re, replacement);
+  out = out.replace(EMAIL_RE, "[redacted-email]");
   out = out.replace(MAC_RE, "[redacted-mac]");
   out = out.replace(IPV4_RE, "[redacted-ip]");
   out = out.replace(IPV6_RE, (m) => (m.replace(/[^0-9a-fA-F]/g, "").length >= 4 ? "[redacted-ip]" : m));

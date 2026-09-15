@@ -276,9 +276,10 @@ Attachments are **text only** here: every attachment is listed in the manifest, 
 text-bearing ones (logs, csv, json, …) are inlined verbatim. Images and other
 binaries are named but never uploaded (the Node API still supports uploads).
 
-Redaction covers emails, IPs, MAC addresses and phone numbers. If your org blocks
-more — hostnames, DNS domains, … — add regexes to `$Config.ExtraRedact`, e.g.
-`@{ Pattern = '\bDESKTOP-[A-Z0-9]+\b'; Replacement = '[redacted-host]' }`.
+Redaction covers emails, IPs, MAC addresses, phone numbers and the usual Windows
+network-config identifiers (host name, DNS suffixes, DHCPv6 IDs). If your org
+blocks more, add regexes to `$Config.ExtraRedact`, e.g.
+`@{ Pattern = '\bACME-[A-Z0-9]+\b'; Replacement = '[redacted-id]' }`.
 
 ```sh
 # ask about a ticket (long ones split automatically); temporary chat by default
@@ -384,8 +385,9 @@ src/log.js      optional debug logging (M365_DEBUG=1)
 scripts/        ask-ticket.js (repo imports), ask-ticket-standalone.ps1 (self-contained, pwsh 7+)
 ```
 
-The ticket scripts redact email addresses, IP addresses, MAC addresses and phone
-numbers from the ticket before sending it to Copilot. `ask-ticket-standalone.ps1` (PowerShell 7+) is the
+The ticket scripts redact email addresses, IP addresses, MAC addresses, phone
+numbers and Windows network-config identifiers (host name, DNS suffixes, DHCPv6
+IDs) from the ticket before sending it to Copilot. `ask-ticket-standalone.ps1` (PowerShell 7+) is the
 self-contained variant: it needs no Node and no repo imports, and uses the OS
 certificate store, so no `NODE_EXTRA_CA_CERTS` is needed on a TLS-inspecting
 corporate proxy.

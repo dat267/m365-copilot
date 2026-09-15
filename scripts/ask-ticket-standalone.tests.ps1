@@ -45,6 +45,19 @@ Assert-StrEqual "redact mac hyphen" "mac [redacted-mac]" (Redact-PII -Text "mac 
 Assert-StrEqual "redact mac colon" "mac [redacted-mac]" (Redact-PII -Text "mac aa:bb:cc:dd:ee:ff")
 Assert-StrEqual "redact mac dotted" "mac [redacted-mac]" (Redact-PII -Text "mac 001a.2b3c.4d5e")
 
+# Windows network-config identifiers (ipconfig /all).
+$ipcfg = @(
+    "   Host Name . . . . . . . . . . . . : DESKTOP-ABC123",
+    "   Primary Dns Suffix  . . . . . . . : corp.example.com",
+    "   DHCPv6 Client DUID. . . . . . . . : 00-01-00-01-2A-BC-3D-4E-00-1A-2B-3C-4D-5E",
+    "Tunnel adapter isatap.corp.example.com:"
+) -join "`n"
+$ipcfgOut = Redact-PII -Text $ipcfg
+Assert-True "net host redacted" (-not $ipcfgOut.Contains("DESKTOP-ABC123") -and $ipcfgOut.Contains("[redacted-host]"))
+Assert-True "net domain redacted" (-not $ipcfgOut.Contains("corp.example.com") -and $ipcfgOut.Contains("[redacted-domain]"))
+Assert-True "net tunnel redacted" ($ipcfgOut.Contains("Tunnel adapter [redacted]:"))
+Assert-True "net duid redacted" (-not $ipcfgOut.Contains("00-01-00-01-2A-BC-3D-4E") -and $ipcfgOut.Contains("[redacted-id]"))
+
 # Org-specific patterns append to the built-ins.
 $Config.ExtraRedact = @(@{ Pattern = '\bDESKTOP-[A-Z0-9]+\b'; Replacement = '[redacted-host]' })
 Assert-StrEqual "extra redact pattern" "host [redacted-host] here" (Redact-PII -Text "host DESKTOP-ABC123 here")

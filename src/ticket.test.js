@@ -357,6 +357,36 @@ test("redactPII replaces phone numbers in common formats", () => {
   for (const [input, expected] of cases) assert.equal(redactPII(input), expected, input);
 });
 
+test("redactPII replaces IPv4 addresses", () => {
+  const cases = [
+    ["from 192.168.1.10", "from [redacted-ip]"],
+    ["host 10.0.0.0/8", "host [redacted-ip]/8"],
+    ["public 203.0.113.7:8080", "public [redacted-ip]:8080"],
+  ];
+  for (const [input, expected] of cases) assert.equal(redactPII(input), expected, input);
+});
+
+test("redactPII replaces IPv6 addresses", () => {
+  assert.equal(redactPII("connect to 2001:db8::1 now"), "connect to [redacted-ip] now");
+  assert.equal(redactPII("loopback fe80::1"), "loopback [redacted-ip]");
+  assert.equal(
+    redactPII("full 2001:0db8:0000:0000:0000:0000:0000:0001"),
+    "full [redacted-ip]",
+  );
+});
+
+test("redactPII leaves non-IP dotted/colon runs alone", () => {
+  for (const text of [
+    "std::vector and ns::foo are not addresses",
+    "at 12:30:00 today",
+    "mac aa:bb:cc:dd:ee:ff",
+    "version 1.2.3.400",
+    "file v1.2.3.4",
+  ]) {
+    assert.equal(redactPII(text), text, text);
+  }
+});
+
 test("redactPII leaves dates, ticket ids and references alone", () => {
   const text = "Created 2026-08-01T10:30:00Z, ticket #10100, ref INC0012345";
   assert.equal(redactPII(text), text);

@@ -672,6 +672,16 @@ function ConvertTo-AttachmentSection {
 function Redact-PII {
     param([string]$Text)
     $out = [regex]::Replace($Text, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[redacted-email]')
+    # IPv4 with 0-255 octets; lookarounds keep it out of longer dotted runs.
+    $ipv4 = '(?<![\w.])(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(?![\w.])'
+    $out = [regex]::Replace($out, $ipv4, '[redacted-ip]')
+    # IPv6: full 8-group and `::`-compressed forms only (skips HH:MM:SS and
+    # std::vector); redact only when the match carries >=4 hex digits.
+    $ipv6 = '(?<![0-9A-Za-z:])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:))(?![0-9A-Za-z:])'
+    $out = [regex]::Replace($out, $ipv6, {
+            param($m)
+            if ((($m.Value -replace '[^0-9a-fA-F]', '').Length) -ge 4) { '[redacted-ip]' } else { $m.Value }
+        })
     # International, parenthesised, NANP 3-3-4, 0-prefixed national.
     # NO bare \d{10,15} rule: Freshservice ids and signed-URL params (Expires=)
     # are long digit runs, and redacting them corrupted attachment URLs.

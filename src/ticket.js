@@ -239,9 +239,22 @@ const PHONE_PATTERNS = [
   /\b0\d{9,10}\b/g,
 ];
 
-/** Redacts email addresses and phone numbers so they are not sent to the model. */
+// IPv4 with 0-255 octets; the lookarounds keep it out of longer dotted runs
+// (so a version like `v1.2.3.4` survives).
+const IPV4_RE = /(?<![\w.])(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(?![\w.])/g;
+
+// IPv6: full 8-group and `::`-compressed forms only. Deliberately omits the
+// non-compressed shorthand, which would match HH:MM:SS times; the lookarounds
+// keep identifiers like `std::vector` intact. A match is redacted only when it
+// carries >=4 hex digits, so a bare `a::b` is left alone.
+const IPV6_RE = /(?<![0-9A-Za-z:])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:))(?![0-9A-Za-z:])/g;
+
+/** Redacts email addresses, IP addresses and phone numbers so they are not
+ *  sent to the model. */
 export function redactPII(text) {
   let out = String(text ?? "").replace(EMAIL_RE, "[redacted-email]");
+  out = out.replace(IPV4_RE, "[redacted-ip]");
+  out = out.replace(IPV6_RE, (m) => (m.replace(/[^0-9a-fA-F]/g, "").length >= 4 ? "[redacted-ip]" : m));
   for (const re of PHONE_PATTERNS) out = out.replace(re, "[redacted-phone]");
   return out;
 }

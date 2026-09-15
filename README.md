@@ -377,8 +377,8 @@ src/log.js      optional debug logging (M365_DEBUG=1)
 scripts/        ask-ticket.js (repo imports), ask-ticket-standalone.ps1 (self-contained, pwsh 7+)
 ```
 
-The ticket scripts redact email addresses and phone numbers from the ticket
-before sending it to Copilot. `ask-ticket-standalone.ps1` (PowerShell 7+) is the
+The ticket scripts redact email addresses, IP addresses and phone numbers from
+the ticket before sending it to Copilot. `ask-ticket-standalone.ps1` (PowerShell 7+) is the
 self-contained variant: it needs no Node and no repo imports, and uses the OS
 certificate store, so no `NODE_EXTRA_CA_CERTS` is needed on a TLS-inspecting
 corporate proxy.

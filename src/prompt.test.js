@@ -17,6 +17,18 @@ test("buildPrompt wraps context as data and appends the instruction", () => {
   );
 });
 
+test("buildPrompt prepends an optional system prompt", () => {
+  const out = buildPrompt("CTX", "do it", "SYS");
+
+  assert.ok(out.startsWith("SYS\n\n"), "system prompt leads");
+  assert.ok(out.includes("<<<CONTEXT\nCTX\nCONTEXT>>>"), "context wrapper kept");
+  assert.ok(out.endsWith("do it"), "instruction still last");
+});
+
+test("buildPrompt ignores a blank system prompt", () => {
+  assert.equal(buildPrompt("CTX", "do it", "   "), buildPrompt("CTX", "do it"));
+});
+
 test("parseArgs reads --context <file> and keeps the instruction as the prompt", () => {
   assert.deepEqual(parseArgs(["--context", "ticket.md", "draft", "a", "reply"]), {
     help: false,

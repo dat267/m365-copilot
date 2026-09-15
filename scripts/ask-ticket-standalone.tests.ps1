@@ -238,6 +238,10 @@ Assert-True "temporary is the default" ((New-ChatHubUrl -Oid "O" -Tid "T" -Sessi
 
 # --- default config --------------------------------------------------------
 Assert-True "temporary chat is on by default" ($Config.Temporary -eq $true)
+Assert-True "system prompt is set by default" ($Config.SystemPrompt.Trim().Length -gt 0)
+Assert-True "system prompt asks for plain text" ($Config.SystemPrompt -match 'plain text')
+$appliedSystem = New-PromptText -Context "CTX" -Instruction "digest" -System $Config.SystemPrompt
+Assert-True "system prompt is prepended" ($appliedSystem.StartsWith($Config.SystemPrompt.Trim()))
 
 # a plain frame carries no annotations (text only)
 $frPlain = New-ChatFrame -RequestId "R" -SessionId "S" -Text "hi" -IsFirstTurn $true | ConvertFrom-Json

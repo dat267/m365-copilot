@@ -281,6 +281,12 @@ network-config identifiers (host name, DNS suffixes, DHCPv6 IDs). If your org
 blocks more, add regexes to `$Config.ExtraRedact`, e.g.
 `@{ Pattern = '\bACME-[A-Z0-9]+\b'; Replacement = '[redacted-id]' }`.
 
+By default the script steers the model with a built-in system prompt for a
+plain-text IT-support **ticket digest** (reported problem, what was tried, status
+and owner, next action) and forbids Markdown/emoji so the reply reads cleanly in
+a terminal. Override it with `$Config.SystemPrompt` or
+`M365_TICKET_SYSTEM_PROMPT`; `scripts/ask-ticket.js` uses the same default.
+
 ```sh
 # ask about a ticket (long ones split automatically); temporary chat by default
 pwsh -File scripts/ask-ticket-standalone.ps1 "Draft a concise customer reply." 24613

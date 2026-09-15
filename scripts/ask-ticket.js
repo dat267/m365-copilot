@@ -39,6 +39,14 @@ import { planImageBatches, planAttachmentBatches } from "../src/attachments.js";
 
 const USAGE = 'usage: ask-ticket.js [--max-chars=N] [--follow] [--new] <ticket-id> "instruction"';
 
+// Steers the model toward a plain-text IT-support ticket digest. M365 has no
+// system role, so this is prepended to the turn as ordinary text.
+const TICKET_SYSTEM_PROMPT = `You are an IT support analyst digesting one Freshservice ticket: its header, an attachment manifest, its conversations, and any inlined attachments.
+
+Produce a short digest: what the user reports, what has already been tried, the current status and owner, and the next concrete action. Answer from the ticket only; if something is missing, say so plainly rather than inventing ticket ids, people, dates or URLs.
+
+Write plain text for a terminal. No Markdown or special formatting: no headings, no **bold** or _italics_, no backticks or code fences, no tables, no bullet characters, no emoji. Plain sentences and blank lines only.`;
+
 const { id, instruction, maxChars, follow, fresh } = parseTicketArgs(process.argv.slice(2));
 if (!Number.isInteger(id) || id <= 0) {
   console.error(USAGE);
@@ -100,7 +108,7 @@ async function turn(message, label) {
   return stream;
 }
 
-await turn(buildPrompt(context, instruction), "answer");
+await turn(buildPrompt(context, instruction, TICKET_SYSTEM_PROMPT), "answer");
 
 if (follow) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });

@@ -61,7 +61,23 @@ param(
 
 # ===========================================================================
 # CONFIG — edit these before deploying.
-# ===========================================================================
+# =========================================================================
+# Default system prompt: an IT-support ticket digest, plain text for a terminal.
+# Override with $Config.SystemPrompt or M365_TICKET_SYSTEM_PROMPT.
+$DefaultSystemPrompt = @'
+You are an IT support analyst digesting one Freshservice ticket: its header, an
+attachment manifest, its conversations, and any inlined attachments.
+
+Produce a short digest: what the user reports, what has already been tried, the
+current status and owner, and the next concrete action. Answer from the ticket
+only; if something is missing, say so plainly rather than inventing ticket ids,
+people, dates or URLs.
+
+Write plain text for a terminal. No Markdown or special formatting: no headings,
+no **bold** or _italics_, no backticks or code fences, no tables, no bullet
+characters, no emoji. Plain sentences and blank lines only.
+'@
+
 $Config = [ordered]@{
     # --- Freshservice -------------------------------------------------------
     Subdomain     = "acme"
@@ -96,7 +112,7 @@ $Config = [ordered]@{
     # (e.g. hostnames or DNS domains). Each entry is
     # @{ Pattern = '<regex>'; Replacement = '[redacted]' }. Empty by default.
     ExtraRedact   = @()
-    SystemPrompt  = ""    # e.g. "You are a concise IT support assistant. Do not invent facts."
+    SystemPrompt  = $DefaultSystemPrompt   # IT-support ticket digest, plain text
 
     # --- conversation mode --------------------------------------------------
     # TEMPORARY CHAT BY DEFAULT: every ChatHub URL carries disableMemory=1, so

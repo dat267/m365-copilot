@@ -28,7 +28,7 @@
 #
 # Requires PowerShell 7+ (pwsh). Credentials are hard-coded in $Config below (or
 # overridden with env vars). The model is always M365 "auto"; set
-# $Config.SystemPrompt to steer the response, $Config.Redact to strip PII.
+# $Config.SystemPrompt to steer the response.
 #
 # LONG TICKETS — this script does NOT truncate the ticket. It renders the ticket
 # as ordered SECTIONS, packs them into as many messages as the per-message text
@@ -107,11 +107,6 @@ $Config = [ordered]@{
         ".sql", ".srt", ".vtt", ".eml", ".diff", ".patch", ".sh", ".ps1", ".bat", ".cmd"
     )
 
-    Redact        = $true
-    # Extra regexes applied after the built-ins, for org-specific identifiers
-    # (e.g. hostnames or DNS domains). Each entry is
-    # @{ Pattern = '<regex>'; Replacement = '[redacted]' }. Empty by default.
-    ExtraRedact   = @()
     SystemPrompt  = $DefaultSystemPrompt   # IT-support ticket digest, plain text
 
     # --- conversation mode --------------------------------------------------
@@ -143,7 +138,6 @@ foreach ($pair in @(
     $value = [Environment]::GetEnvironmentVariable($pair[0])
     if (-not [string]::IsNullOrEmpty($value)) { $Config[$pair[1]] = [int]$value }
 }
-if ($env:M365_TICKET_REDACT) { $Config.Redact = ($env:M365_TICKET_REDACT -eq "1") }
 if ($env:M365_TICKET_TEMPORARY) { $Config.Temporary = ($env:M365_TICKET_TEMPORARY -eq "1") }
 if ($env:M365_TICKET_STATE_FILE) { $Config.StateFile = $env:M365_TICKET_STATE_FILE }
 
@@ -569,54 +563,8 @@ function ConvertTo-AttachmentSection {
 }
 
 # ===========================================================================
-# PII redaction + payload budget + prompt assembly
+# Payload budget + prompt assembly
 # ===========================================================================
-function Redact-PII {
-    param([string]$Text)
-    # Windows network-config (`ipconfig /all`) labels carry machine/org
-    # identifiers; redact the value while keeping the label.
-    $netLines = @(
-        @{ Pattern = '(?im)^(\s*Host Name[.\s]*:\s*)[^\r\n]*'; Replacement = '$1[redacted-host]' },
-        @{ Pattern = '(?im)^(\s*(?:Primary Dns Suffix|DNS Suffix Search List|Connection-specific DNS Suffix)[.\s]*:\s*)[^\r\n]*'; Replacement = '$1[redacted-domain]' },
-        @{ Pattern = '(?im)^(\s*DHCPv6 (?:Client DUID|IAID)[.\s]*:\s*)[^\r\n]*'; Replacement = '$1[redacted-id]' },
-        @{ Pattern = '(?im)^(\s*Tunnel adapter\s+)[^:\r\n]*:'; Replacement = '$1[redacted]:' }
-    )
-    $out = $Text
-    foreach ($r in $netLines) { $out = [regex]::Replace($out, $r.Pattern, $r.Replacement) }
-    $out = [regex]::Replace($out, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[redacted-email]')
-    # MAC addresses (00-1A-2B-3C-4D-5E, 00:1a:2b:3c:4d:5e, 001a.2b3c.4d5e).
-    $mac = '\b[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}\b|\b[0-9A-Fa-f]{4}(?:\.[0-9A-Fa-f]{4}){2}\b'
-    $out = [regex]::Replace($out, $mac, '[redacted-mac]')
-    # IPv4 with 0-255 octets; lookarounds keep it out of longer dotted runs.
-    $ipv4 = '(?<![\w.])(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(?![\w.])'
-    $out = [regex]::Replace($out, $ipv4, '[redacted-ip]')
-    # IPv6: full 8-group and `::`-compressed forms only (skips HH:MM:SS and
-    # std::vector); redact only when the match carries >=4 hex digits.
-    $ipv6 = '(?<![0-9A-Za-z:])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:))(?![0-9A-Za-z:])'
-    $out = [regex]::Replace($out, $ipv6, {
-            param($m)
-            if ((($m.Value -replace '[^0-9a-fA-F]', '').Length) -ge 4) { '[redacted-ip]' } else { $m.Value }
-        })
-    # International, parenthesised, NANP 3-3-4, 0-prefixed national.
-    # NO bare \d{10,15} rule: Freshservice ids and signed-URL params (Expires=)
-    # are long digit runs, and redacting them corrupted attachment URLs.
-    $patterns = @(
-        '\+\d[\d \t().-]{5,}\d',
-        '\(\d{3}\)[ .-]?\d{3}[ .-]\d{4}',
-        '\b\d{3}[ .-]\d{3}[ .-]\d{4}\b',
-        '\b0\d{1,3}[ .-]\d{3,4}[ .-]?\d{3,4}\b',
-        '\b0\d{9,10}\b'
-    )
-    foreach ($p in $patterns) { $out = [regex]::Replace($out, $p, '[redacted-phone]') }
-    foreach ($r in @($Config.ExtraRedact)) {
-        if ($r -and $r.Pattern) {
-            $replacement = if ($r.Replacement) { $r.Replacement } else { '[redacted]' }
-            $out = [regex]::Replace($out, $r.Pattern, $replacement)
-        }
-    }
-    return $out
-}
-
 function Limit-Text {
     param([string]$Text, [int]$MaxChars)
     $marker = "`n`n[...truncated...]`n`n"
@@ -1039,10 +987,6 @@ function Invoke-AskTicket {
     foreach ($f in $attachmentPlan.Inline) {
         $bytes = Get-UrlBytes -Url $f.Url -MaxBytes $Config.MaxInlineFileBytes
         $sections.Add((ConvertTo-AttachmentSection -Attachment $f -Bytes $bytes -MaxChars $Config.MaxFileChars))
-    }
-
-    if ($Config.Redact) {
-        for ($i = 0; $i -lt $sections.Count; $i++) { $sections[$i] = Redact-PII -Text $sections[$i] }
     }
 
     $messages = Group-ContextSections -Sections $sections.ToArray() -MaxChars $Config.MaxTextChars

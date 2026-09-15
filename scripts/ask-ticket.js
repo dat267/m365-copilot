@@ -34,7 +34,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { M365Session, MAX_IMAGES_PER_MESSAGE } from "../src/index.js";
 import { buildPrompt } from "../src/prompt.js";
-import { parseTicketArgs, resolveConfig, fetchTicket, renderTicket, truncateContext, makeFreshserviceGet, redactPII } from "../src/ticket.js";
+import { parseTicketArgs, resolveConfig, fetchTicket, renderTicket, truncateContext, makeFreshserviceGet } from "../src/ticket.js";
 import { planImageBatches, planAttachmentBatches } from "../src/attachments.js";
 
 const USAGE = 'usage: ask-ticket.js [--max-chars=N] [--follow] [--new] <ticket-id> "instruction"';
@@ -68,7 +68,7 @@ const { baseUrl, session: freshserviceSession } = resolveConfig(process.env, {
 const get = makeFreshserviceGet({ baseUrl, session: freshserviceSession });
 
 const { ticket, conversations, attachments } = await fetchTicket(id, get);
-const raw = redactPII(renderTicket(ticket, conversations, { attachments }));
+const raw = renderTicket(ticket, conversations, { attachments });
 const context = truncateContext(raw, maxChars);
 if (context.length < raw.length) {
   console.error(`[ask-ticket] payload truncated ${raw.length} → ${context.length} chars (--max-chars=${maxChars})`);

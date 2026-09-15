@@ -70,7 +70,7 @@ generation, no automated password/TOTP login.
 | `src/graph-upload.js` | document upload to OneDrive `copilotuploads` + `LocalFile` annotations (`spoId`, `toFileAnnotations`) |
 | `src/session-store.js` | persisted default conversation (`session.json`): id/turn-count resolution, load/save |
 | `src/prompt.js` | CLI context/prompt assembly (`--context`, `--new`, `--temporary`), no I/O |
-| `src/ticket.js` | Freshservice ticket fetch/render + `redactPII` (used by `scripts/ask-ticket.js`); repo-native config (`FRESHSERVICE_*` / `freshservice.json`) — **not** fsvc |
+| `src/ticket.js` | Freshservice ticket fetch/render; repo-native config (`FRESHSERVICE_*` / `freshservice.json`) — **not** fsvc |
 | `src/index.js` | Public API: `ask()` (one-shot) and `M365Session` (multi-turn, handles auth + reconnect) |
 | `src/log.js` | Optional debug logging (`M365_DEBUG=1` → `~/.config/m365-copilot/debug.log`) |
 | `examples/` | Runnable examples |

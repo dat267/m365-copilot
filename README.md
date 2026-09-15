@@ -276,10 +276,9 @@ Attachments are **text only** here: every attachment is listed in the manifest, 
 text-bearing ones (logs, csv, json, …) are inlined verbatim. Images and other
 binaries are named but never uploaded (the Node API still supports uploads).
 
-Redaction covers emails, IPs, MAC addresses, phone numbers and the usual Windows
-network-config identifiers (host name, DNS suffixes, DHCPv6 IDs). If your org
-blocks more, add regexes to `$Config.ExtraRedact`, e.g.
-`@{ Pattern = '\bACME-[A-Z0-9]+\b'; Replacement = '[redacted-id]' }`.
+The ticket is sent as-is — no PII or network redaction. M365's content filter can
+refuse a ticket whether or not identifiers are masked, so this script does not
+rewrite the content.
 
 By default the script steers the model with a built-in system prompt for a
 plain-text IT-support **ticket digest** (reported problem, what was tried, status
@@ -317,7 +316,6 @@ Limits that drive the split (all overridable via `$Config` or env):
 | `MaxInlineFiles` | `M365_TICKET_MAX_INLINE_FILES` | 20 | attachment count limit |
 | `MaxInlineFileBytes` | `M365_TICKET_MAX_INLINE_FILE_BYTES` | 262144 | attachment size limit |
 | `MaxFileChars` | `M365_TICKET_MAX_FILE_CHARS` | 20000 | per-attachment inline budget |
-| `ExtraRedact` | — | `@()` | extra regexes applied after the built-ins (org-specific identifiers) |
 
 The caps are used to flag what would not fit. There is no separate "max
 attachments" setting: how many can be delivered is derived from `MaxMessages`,
@@ -386,14 +384,12 @@ src/graph-upload.js  document upload to OneDrive copilotuploads + LocalFile anno
 src/index.js    public API: ask() + M365Session
 src/session-store.js  persisted default conversation (session.json)
 src/prompt.js   CLI context/prompt assembly (--context, --new, --temporary)
-src/ticket.js   Freshservice ticket fetch/render + PII redaction
+src/ticket.js   Freshservice ticket fetch/render
 src/log.js      optional debug logging (M365_DEBUG=1)
 scripts/        ask-ticket.js (repo imports), ask-ticket-standalone.ps1 (self-contained, pwsh 7+)
 ```
 
-The ticket scripts redact email addresses, IP addresses, MAC addresses, phone
-numbers and Windows network-config identifiers (host name, DNS suffixes, DHCPv6
-IDs) from the ticket before sending it to Copilot. `ask-ticket-standalone.ps1` (PowerShell 7+) is the
+The ticket text is sent to Copilot as-is — no redaction. `ask-ticket-standalone.ps1` (PowerShell 7+) is the
 self-contained variant: it needs no Node and no repo imports, and uses the OS
 certificate store, so no `NODE_EXTRA_CA_CERTS` is needed on a TLS-inspecting
 corporate proxy.

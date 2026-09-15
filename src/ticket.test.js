@@ -9,7 +9,6 @@ import {
   parseTicketArgs,
   makeFreshserviceGet,
   normalizeAttachment,
-  redactPII,
   TRUNCATION_MARKER,
 } from "./ticket.js";
 
@@ -371,90 +370,3 @@ test("makeFreshserviceGet throws on a non-OK response", async () => {
   await assert.rejects(() => get("tickets/1"), /401/);
 });
 
-test("redactPII replaces email addresses", () => {
-  assert.equal(redactPII("Email omar.saleh@example.com now"), "Email [redacted-email] now");
-});
-
-test("redactPII replaces phone numbers in common formats", () => {
-  const cases = [
-    ["call +1 (555) 123-4567", "call [redacted-phone]"],
-    ["call 555-123-4567", "call [redacted-phone]"],
-    ["call (555) 123-4567", "call [redacted-phone]"],
-    ["call +44 20 7946 0958", "call [redacted-phone]"],
-    ["call 07123456789", "call [redacted-phone]"],
-    ["call 020 7946 0958", "call [redacted-phone]"],
-  ];
-  for (const [input, expected] of cases) assert.equal(redactPII(input), expected, input);
-});
-
-test("redactPII strips Windows network-config identifiers", () => {
-  const out = redactPII(
-    [
-      "Windows IP Configuration",
-      "   Host Name . . . . . . . . . . . . : DESKTOP-ABC123",
-      "   Primary Dns Suffix  . . . . . . . : corp.example.com",
-      "   DNS Suffix Search List. . . . . . : corp.example.com",
-      "   Connection-specific DNS Suffix  . : corp.example.com",
-      "   DHCPv6 Client DUID. . . . . . . . : 00-01-00-01-2A-BC-3D-4E-00-1A-2B-3C-4D-5E",
-      "   DHCPv6 IAID . . . . . . . . . . . : 123456789",
-      "Tunnel adapter isatap.corp.example.com:",
-    ].join("\n"),
-  );
-
-  assert.ok(!out.includes("DESKTOP-ABC123"), "host name removed");
-  assert.ok(!out.includes("corp.example.com"), "domains removed");
-  assert.ok(out.includes("Tunnel adapter [redacted]:"), "tunnel adapter name removed");
-  assert.ok(!out.includes("00-01-00-01-2A-BC-3D-4E"), "DUID removed");
-  assert.ok(out.includes("[redacted-host]"), "host marker present");
-  assert.equal((out.match(/\[redacted-domain\]/g) ?? []).length, 3, "every DNS suffix redacted");
-  assert.ok(out.includes("[redacted-id]"), "DHCPv6 id marker present");
-});
-
-test("redactPII replaces MAC addresses", () => {
-  assert.equal(redactPII("physical 00-1A-2B-3C-4D-5E"), "physical [redacted-mac]");
-  assert.equal(redactPII("physical 00:1a:2b:3c:4d:5e"), "physical [redacted-mac]");
-  assert.equal(redactPII("physical 001a.2b3c.4d5e"), "physical [redacted-mac]");
-});
-
-test("redactPII replaces IPv4 addresses", () => {
-  const cases = [
-    ["from 192.168.1.10", "from [redacted-ip]"],
-    ["host 10.0.0.0/8", "host [redacted-ip]/8"],
-    ["public 203.0.113.7:8080", "public [redacted-ip]:8080"],
-  ];
-  for (const [input, expected] of cases) assert.equal(redactPII(input), expected, input);
-});
-
-test("redactPII replaces IPv6 addresses", () => {
-  assert.equal(redactPII("connect to 2001:db8::1 now"), "connect to [redacted-ip] now");
-  assert.equal(redactPII("loopback fe80::1"), "loopback [redacted-ip]");
-  assert.equal(
-    redactPII("full 2001:0db8:0000:0000:0000:0000:0000:0001"),
-    "full [redacted-ip]",
-  );
-});
-
-test("redactPII leaves non-IP dotted/colon runs alone", () => {
-  for (const text of [
-    "std::vector and ns::foo are not addresses",
-    "at 12:30:00 today",
-    "version 1.2.3.400",
-    "file v1.2.3.4",
-  ]) {
-    assert.equal(redactPII(text), text, text);
-  }
-});
-
-test("redactPII leaves dates, ticket ids and references alone", () => {
-  const text = "Created 2026-08-01T10:30:00Z, ticket #10100, ref INC0012345";
-  assert.equal(redactPII(text), text);
-});
-
-test("redactPII leaves long numeric ids and attachment URLs intact", () => {
-  const url =
-    "https://acme.attachments.freshservice.com/data/helpdesk/attachments/production/21117119076/original/a.jpeg" +
-    "?response-content-type=image/jpeg&Expires=1789502963&Signature=abc123";
-
-  assert.equal(redactPII(url), url, "a signed attachment URL must survive intact");
-  assert.equal(redactPII("Requester  : 21003608052"), "Requester  : 21003608052");
-});

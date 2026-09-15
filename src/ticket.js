@@ -227,62 +227,6 @@ export function makeFreshserviceGet({ baseUrl, session, fetchImpl = fetch }) {
   };
 }
 
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-// Ordered: international (+CC), parenthesised, NANP 3-3-4, then 0-prefixed
-// national numbers.
-//
-// Deliberately does NOT include a bare `\d{10,15}` rule: Freshservice ids
-// (ticket/requester/attachment) and signed-URL params such as `Expires=` are
-// long digit runs, and redacting them corrupted attachment URLs and made
-// requester ids render as "[redacted-phone]". Trade-off: a phone written with
-// no separators and no leading + or 0 is not redacted.
-const PHONE_PATTERNS = [
-  /\+\d[\d \t().-]{5,}\d/g,
-  /\(\d{3}\)[ .-]?\d{3}[ .-]\d{4}/g,
-  /\b\d{3}[ .-]\d{3}[ .-]\d{4}\b/g,
-  /\b0\d{1,3}[ .-]\d{3,4}[ .-]?\d{3,4}\b/g,
-  /\b0\d{9,10}\b/g,
-];
-
-// IPv4 with 0-255 octets; the lookarounds keep it out of longer dotted runs
-// (so a version like `v1.2.3.4` survives).
-const IPV4_RE = /(?<![\w.])(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(?![\w.])/g;
-
-// MAC addresses: 00-1A-2B-3C-4D-5E, 00:1a:2b:3c:4d:5e, 001a.2b3c.4d5e. Six
-// colon/hyphen octets can't be confused with IPv6 (which needs `::` or eight
-// groups), and the Cisco dotted form is unambiguous.
-const MAC_RE = /\b[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}\b|\b[0-9A-Fa-f]{4}(?:\.[0-9A-Fa-f]{4}){2}\b/g;
-
-// Values on Windows network-config lines (`ipconfig /all`) that are machine or
-// organisation identifiers. The filter that refuses these tickets keys on more
-// than IPs, so strip the host name, DNS suffixes/domains and DHCPv6 IDs too.
-// Anchored on the ipconfig label, so prose elsewhere is untouched.
-const NET_LINE_RULES = [
-  [/^(\s*Host Name[.\s]*:\s*)[^\r\n]*/gim, "$1[redacted-host]"],
-  [/^(\s*(?:Primary Dns Suffix|DNS Suffix Search List|Connection-specific DNS Suffix)[.\s]*:\s*)[^\r\n]*/gim, "$1[redacted-domain]"],
-  [/^(\s*DHCPv6 (?:Client DUID|IAID)[.\s]*:\s*)[^\r\n]*/gim, "$1[redacted-id]"],
-  [/^(\s*Tunnel adapter\s+)[^:\r\n]*:/gim, "$1[redacted]:"],
-];
-
-// IPv6: full 8-group and `::`-compressed forms only. Deliberately omits the
-// non-compressed shorthand, which would match HH:MM:SS times; the lookarounds
-// keep identifiers like `std::vector` intact. A match is redacted only when it
-// carries >=4 hex digits, so a bare `a::b` is left alone.
-const IPV6_RE = /(?<![0-9A-Za-z:])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:))(?![0-9A-Za-z:])/g;
-
-/** Redacts email addresses, IP addresses and phone numbers so they are not
- *  sent to the model. */
-export function redactPII(text) {
-  let out = String(text ?? "");
-  for (const [re, replacement] of NET_LINE_RULES) out = out.replace(re, replacement);
-  out = out.replace(EMAIL_RE, "[redacted-email]");
-  out = out.replace(MAC_RE, "[redacted-mac]");
-  out = out.replace(IPV4_RE, "[redacted-ip]");
-  out = out.replace(IPV6_RE, (m) => (m.replace(/[^0-9a-fA-F]/g, "").length >= 4 ? "[redacted-ip]" : m));
-  for (const re of PHONE_PATTERNS) out = out.replace(re, "[redacted-phone]");
-  return out;
-}
-
 export function truncateContext(text, maxChars) {
   if (text.length <= maxChars) return text;
   if (maxChars <= TRUNCATION_MARKER.length) return text.slice(0, maxChars);

@@ -20,51 +20,6 @@ function Assert-True {
     if (-not $Condition) { Write-Host "FAIL $Name"; $script:Failures++ } else { Write-Host "ok   $Name" }
 }
 
-# --- redaction -------------------------------------------------------------
-Assert-StrEqual "redact email" "Email [redacted-email] now" (Redact-PII -Text "Email omar.saleh@example.com now")
-Assert-StrEqual "redact NANP" "call [redacted-phone]" (Redact-PII -Text "call 555-123-4567")
-Assert-StrEqual "redact parenthesised" "call [redacted-phone]" (Redact-PII -Text "call (555) 123-4567")
-Assert-StrEqual "redact international" "call [redacted-phone]" (Redact-PII -Text "call +44 20 7946 0958")
-Assert-StrEqual "redact UK mobile" "call [redacted-phone]" (Redact-PII -Text "call 07123456789")
-Assert-StrEqual "redact UK spaced" "call [redacted-phone]" (Redact-PII -Text "call 020 7946 0958")
-Assert-StrEqual "keep dates/ids" "Created 2026-08-01T10:30:00Z, ticket #10100, ref INC0012345" `
-    (Redact-PII -Text "Created 2026-08-01T10:30:00Z, ticket #10100, ref INC0012345")
-$signedUrl = "https://acme.attachments.freshservice.com/data/helpdesk/attachments/production/21117119076/original/a.jpeg?Expires=1789502963&Signature=abc"
-Assert-StrEqual "keep signed attachment url" $signedUrl (Redact-PII -Text $signedUrl)
-Assert-StrEqual "keep long numeric id" "Requester  : 21005099904" (Redact-PII -Text "Requester  : 21005099904")
-
-# IP addresses
-Assert-StrEqual "redact ipv4" "from [redacted-ip]" (Redact-PII -Text "from 192.168.1.10")
-Assert-StrEqual "redact ipv4 cidr" "host [redacted-ip]/8" (Redact-PII -Text "host 10.0.0.0/8")
-Assert-StrEqual "redact ipv4 port" "public [redacted-ip]:8080" (Redact-PII -Text "public 203.0.113.7:8080")
-Assert-StrEqual "redact ipv6" "connect to [redacted-ip] now" (Redact-PII -Text "connect to 2001:db8::1 now")
-Assert-StrEqual "redact ipv6 full" "full [redacted-ip]" (Redact-PII -Text "full 2001:0db8:0000:0000:0000:0000:0000:0001")
-Assert-StrEqual "keep cpp namespaces" "std::vector and ns::foo are not addresses" (Redact-PII -Text "std::vector and ns::foo are not addresses")
-Assert-StrEqual "keep times" "at 12:30:00 today" (Redact-PII -Text "at 12:30:00 today")
-Assert-StrEqual "redact mac hyphen" "mac [redacted-mac]" (Redact-PII -Text "mac 00-1A-2B-3C-4D-5E")
-Assert-StrEqual "redact mac colon" "mac [redacted-mac]" (Redact-PII -Text "mac aa:bb:cc:dd:ee:ff")
-Assert-StrEqual "redact mac dotted" "mac [redacted-mac]" (Redact-PII -Text "mac 001a.2b3c.4d5e")
-
-# Windows network-config identifiers (ipconfig /all).
-$ipcfg = @(
-    "   Host Name . . . . . . . . . . . . : DESKTOP-ABC123",
-    "   Primary Dns Suffix  . . . . . . . : corp.example.com",
-    "   DHCPv6 Client DUID. . . . . . . . : 00-01-00-01-2A-BC-3D-4E-00-1A-2B-3C-4D-5E",
-    "Tunnel adapter isatap.corp.example.com:"
-) -join "`n"
-$ipcfgOut = Redact-PII -Text $ipcfg
-Assert-True "net host redacted" (-not $ipcfgOut.Contains("DESKTOP-ABC123") -and $ipcfgOut.Contains("[redacted-host]"))
-Assert-True "net domain redacted" (-not $ipcfgOut.Contains("corp.example.com") -and $ipcfgOut.Contains("[redacted-domain]"))
-Assert-True "net tunnel redacted" ($ipcfgOut.Contains("Tunnel adapter [redacted]:"))
-Assert-True "net duid redacted" (-not $ipcfgOut.Contains("00-01-00-01-2A-BC-3D-4E") -and $ipcfgOut.Contains("[redacted-id]"))
-
-# Org-specific patterns append to the built-ins.
-$Config.ExtraRedact = @(@{ Pattern = '\bDESKTOP-[A-Z0-9]+\b'; Replacement = '[redacted-host]' })
-Assert-StrEqual "extra redact pattern" "host [redacted-host] here" (Redact-PII -Text "host DESKTOP-ABC123 here")
-$Config.ExtraRedact = @()
-Assert-StrEqual "extra redact empty by default" "host DESKTOP-ABC123 here" (Redact-PII -Text "host DESKTOP-ABC123 here")
-Assert-StrEqual "keep invalid octets" "version 1.2.3.400" (Redact-PII -Text "version 1.2.3.400")
-Assert-StrEqual "keep version prefix" "file v1.2.3.4" (Redact-PII -Text "file v1.2.3.4")
 
 # --- payload budget --------------------------------------------------------
 Assert-StrEqual "limit under budget" "short" (Limit-Text -Text "short" -MaxChars 100)

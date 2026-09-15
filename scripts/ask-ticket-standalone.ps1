@@ -92,6 +92,10 @@ $Config = [ordered]@{
     )
 
     Redact        = $true
+    # Extra regexes applied after the built-ins, for org-specific identifiers
+    # (e.g. hostnames or DNS domains). Each entry is
+    # @{ Pattern = '<regex>'; Replacement = '[redacted]' }. Empty by default.
+    ExtraRedact   = @()
     SystemPrompt  = ""    # e.g. "You are a concise IT support assistant. Do not invent facts."
 
     # --- conversation mode --------------------------------------------------
@@ -554,6 +558,9 @@ function ConvertTo-AttachmentSection {
 function Redact-PII {
     param([string]$Text)
     $out = [regex]::Replace($Text, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[redacted-email]')
+    # MAC addresses (00-1A-2B-3C-4D-5E, 00:1a:2b:3c:4d:5e, 001a.2b3c.4d5e).
+    $mac = '\b[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}\b|\b[0-9A-Fa-f]{4}(?:\.[0-9A-Fa-f]{4}){2}\b'
+    $out = [regex]::Replace($out, $mac, '[redacted-mac]')
     # IPv4 with 0-255 octets; lookarounds keep it out of longer dotted runs.
     $ipv4 = '(?<![\w.])(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(?![\w.])'
     $out = [regex]::Replace($out, $ipv4, '[redacted-ip]')
@@ -575,6 +582,12 @@ function Redact-PII {
         '\b0\d{9,10}\b'
     )
     foreach ($p in $patterns) { $out = [regex]::Replace($out, $p, '[redacted-phone]') }
+    foreach ($r in @($Config.ExtraRedact)) {
+        if ($r -and $r.Pattern) {
+            $replacement = if ($r.Replacement) { $r.Replacement } else { '[redacted]' }
+            $out = [regex]::Replace($out, $r.Pattern, $replacement)
+        }
+    }
     return $out
 }
 

@@ -41,7 +41,15 @@ Assert-StrEqual "redact ipv6" "connect to [redacted-ip] now" (Redact-PII -Text "
 Assert-StrEqual "redact ipv6 full" "full [redacted-ip]" (Redact-PII -Text "full 2001:0db8:0000:0000:0000:0000:0000:0001")
 Assert-StrEqual "keep cpp namespaces" "std::vector and ns::foo are not addresses" (Redact-PII -Text "std::vector and ns::foo are not addresses")
 Assert-StrEqual "keep times" "at 12:30:00 today" (Redact-PII -Text "at 12:30:00 today")
-Assert-StrEqual "keep mac" "mac aa:bb:cc:dd:ee:ff" (Redact-PII -Text "mac aa:bb:cc:dd:ee:ff")
+Assert-StrEqual "redact mac hyphen" "mac [redacted-mac]" (Redact-PII -Text "mac 00-1A-2B-3C-4D-5E")
+Assert-StrEqual "redact mac colon" "mac [redacted-mac]" (Redact-PII -Text "mac aa:bb:cc:dd:ee:ff")
+Assert-StrEqual "redact mac dotted" "mac [redacted-mac]" (Redact-PII -Text "mac 001a.2b3c.4d5e")
+
+# Org-specific patterns append to the built-ins.
+$Config.ExtraRedact = @(@{ Pattern = '\bDESKTOP-[A-Z0-9]+\b'; Replacement = '[redacted-host]' })
+Assert-StrEqual "extra redact pattern" "host [redacted-host] here" (Redact-PII -Text "host DESKTOP-ABC123 here")
+$Config.ExtraRedact = @()
+Assert-StrEqual "extra redact empty by default" "host DESKTOP-ABC123 here" (Redact-PII -Text "host DESKTOP-ABC123 here")
 Assert-StrEqual "keep invalid octets" "version 1.2.3.400" (Redact-PII -Text "version 1.2.3.400")
 Assert-StrEqual "keep version prefix" "file v1.2.3.4" (Redact-PII -Text "file v1.2.3.4")
 

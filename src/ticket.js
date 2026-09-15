@@ -248,6 +248,11 @@ const PHONE_PATTERNS = [
 // (so a version like `v1.2.3.4` survives).
 const IPV4_RE = /(?<![\w.])(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(?![\w.])/g;
 
+// MAC addresses: 00-1A-2B-3C-4D-5E, 00:1a:2b:3c:4d:5e, 001a.2b3c.4d5e. Six
+// colon/hyphen octets can't be confused with IPv6 (which needs `::` or eight
+// groups), and the Cisco dotted form is unambiguous.
+const MAC_RE = /\b[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}\b|\b[0-9A-Fa-f]{4}(?:\.[0-9A-Fa-f]{4}){2}\b/g;
+
 // IPv6: full 8-group and `::`-compressed forms only. Deliberately omits the
 // non-compressed shorthand, which would match HH:MM:SS times; the lookarounds
 // keep identifiers like `std::vector` intact. A match is redacted only when it
@@ -258,6 +263,7 @@ const IPV6_RE = /(?<![0-9A-Za-z:])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?
  *  sent to the model. */
 export function redactPII(text) {
   let out = String(text ?? "").replace(EMAIL_RE, "[redacted-email]");
+  out = out.replace(MAC_RE, "[redacted-mac]");
   out = out.replace(IPV4_RE, "[redacted-ip]");
   out = out.replace(IPV6_RE, (m) => (m.replace(/[^0-9a-fA-F]/g, "").length >= 4 ? "[redacted-ip]" : m));
   for (const re of PHONE_PATTERNS) out = out.replace(re, "[redacted-phone]");

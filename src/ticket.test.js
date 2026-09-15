@@ -387,6 +387,12 @@ test("redactPII replaces phone numbers in common formats", () => {
   for (const [input, expected] of cases) assert.equal(redactPII(input), expected, input);
 });
 
+test("redactPII replaces MAC addresses", () => {
+  assert.equal(redactPII("physical 00-1A-2B-3C-4D-5E"), "physical [redacted-mac]");
+  assert.equal(redactPII("physical 00:1a:2b:3c:4d:5e"), "physical [redacted-mac]");
+  assert.equal(redactPII("physical 001a.2b3c.4d5e"), "physical [redacted-mac]");
+});
+
 test("redactPII replaces IPv4 addresses", () => {
   const cases = [
     ["from 192.168.1.10", "from [redacted-ip]"],
@@ -409,7 +415,6 @@ test("redactPII leaves non-IP dotted/colon runs alone", () => {
   for (const text of [
     "std::vector and ns::foo are not addresses",
     "at 12:30:00 today",
-    "mac aa:bb:cc:dd:ee:ff",
     "version 1.2.3.400",
     "file v1.2.3.4",
   ]) {

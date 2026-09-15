@@ -276,6 +276,10 @@ Attachments are **text only** here: every attachment is listed in the manifest, 
 text-bearing ones (logs, csv, json, …) are inlined verbatim. Images and other
 binaries are named but never uploaded (the Node API still supports uploads).
 
+Redaction covers emails, IPs, MAC addresses and phone numbers. If your org blocks
+more — hostnames, DNS domains, … — add regexes to `$Config.ExtraRedact`, e.g.
+`@{ Pattern = '\bDESKTOP-[A-Z0-9]+\b'; Replacement = '[redacted-host]' }`.
+
 ```sh
 # ask about a ticket (long ones split automatically); temporary chat by default
 pwsh -File scripts/ask-ticket-standalone.ps1 "Draft a concise customer reply." 24613
@@ -306,8 +310,7 @@ Limits that drive the split (all overridable via `$Config` or env):
 | `MaxInlineFiles` | `M365_TICKET_MAX_INLINE_FILES` | 20 | attachment count limit |
 | `MaxInlineFileBytes` | `M365_TICKET_MAX_INLINE_FILE_BYTES` | 262144 | attachment size limit |
 | `MaxFileChars` | `M365_TICKET_MAX_FILE_CHARS` | 20000 | per-attachment inline budget |
-| `MaxAttachmentsPerMessage` | `M365_TICKET_MAX_ATTACHMENTS_PER_MESSAGE` | 3 | shared image+file count limit |
-| `MaxImageDimension` / `MaxImageBytes` | … | 2048 / 4 MB | image resolution / size |
+| `ExtraRedact` | — | `@()` | extra regexes applied after the built-ins (org-specific identifiers) |
 
 The caps are used to flag what would not fit. There is no separate "max
 attachments" setting: how many can be delivered is derived from `MaxMessages`,
@@ -381,8 +384,8 @@ src/log.js      optional debug logging (M365_DEBUG=1)
 scripts/        ask-ticket.js (repo imports), ask-ticket-standalone.ps1 (self-contained, pwsh 7+)
 ```
 
-The ticket scripts redact email addresses, IP addresses and phone numbers from
-the ticket before sending it to Copilot. `ask-ticket-standalone.ps1` (PowerShell 7+) is the
+The ticket scripts redact email addresses, IP addresses, MAC addresses and phone
+numbers from the ticket before sending it to Copilot. `ask-ticket-standalone.ps1` (PowerShell 7+) is the
 self-contained variant: it needs no Node and no repo imports, and uses the OS
 certificate store, so no `NODE_EXTRA_CA_CERTS` is needed on a TLS-inspecting
 corporate proxy.

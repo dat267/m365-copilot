@@ -167,6 +167,15 @@ Assert-True "nothing dropped" ($joined.Contains("body 200"))
 # single short section stays one message
 Assert-True "short ticket is one message" ((Group-ContextSections -Sections @("a", "b") -MaxChars 1000).Count -eq 1)
 
+# regression: a single packed message must still be an ARRAY. PowerShell
+# unrolls single-element returns, which made $messages[0] the FIRST CHARACTER
+# of the context (the whole ticket collapsed to "#").
+$oneMsg = Group-ContextSections -Sections @("hello world") -MaxChars 1000
+Assert-True "single packed message is an array" ($oneMsg -is [System.Array])
+Assert-StrEqual "single packed message keeps full text" "hello world" $oneMsg[0]
+$oneChunk = Split-TextIntoChunks -Text "short" -MaxChars 100
+Assert-True "single chunk is an array" ($oneChunk -is [System.Array])
+
 # --- conversation mode -----------------------------------------------------
 Assert-StrEqual "resolve explicit wins" "conv-explicit" (Resolve-ConversationId -Explicit "conv-explicit" -UseLast $true -Last "conv-last")
 Assert-StrEqual "resolve last" "conv-last" (Resolve-ConversationId -Explicit "" -UseLast $true -Last "conv-last")

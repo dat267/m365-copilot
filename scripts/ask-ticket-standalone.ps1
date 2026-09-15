@@ -593,7 +593,8 @@ function Split-TextIntoChunks {
     }
     if ($current.Length -gt 0) { $chunks.Add($current.ToString().TrimEnd("`n")) }
     if ($chunks.Count -eq 0) { $chunks.Add("") }
-    return $chunks.ToArray()
+    # See Group-ContextSections: keep a single chunk an array.
+    return ,$chunks.ToArray()
 }
 
 # Packs sections greedily into messages that each fit MaxChars. Oversized
@@ -618,7 +619,10 @@ function Group-ContextSections {
     }
     if ($current.Length -gt 0) { $messages.Add($current.ToString()) }
     if ($messages.Count -eq 0) { $messages.Add("") }
-    return $messages.ToArray()
+    # Unary comma: a single-element array must stay an array, else the caller's
+    # `$messages[0]` indexes the first CHARACTER (PowerShell unrolls single-item
+    # collections returned from a function).
+    return ,$messages.ToArray()
 }
 
 # ===========================================================================
@@ -1216,7 +1220,7 @@ function Invoke-AskTicket {
     Write-Host ("[ask-ticket] mode=" + $(if ($Temporary) { "temporary" } else { "persistent" }) +
         " conversation=$(if ($ConversationId) { $ConversationId } else { '<new>' })")
 
-    if ($Plan) { return $messages }
+    if ($Plan) { return ,$messages }
 
     $accessToken = Get-M365AccessToken
     $sessionId = [guid]::NewGuid().ToString()

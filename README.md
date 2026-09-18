@@ -71,12 +71,6 @@ Chromium browser itself is a separate `npx playwright install chromium`
 download. Without it, everything still runs as long as a token is supplied via
 `M365_ACCESS_TOKEN` / `M365_REFRESH_TOKEN` (see "No Playwright?").
 
-Coming from a pre-release checkout? Move your existing tokens once:
-
-```sh
-mv ~/.config/m365-ask ~/.config/m365-copilot
-```
-
 ## Use
 
 The CLI has exactly two commands (`node cli.js` is also installed as

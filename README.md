@@ -330,77 +330,33 @@ the web client by attaching mixtures:
 | 3 images + any file | **3** (file refused) |
 
 So batch them **together**, never three images plus three files. `MAX_IMAGES_PER_MESSAGE`
-is the shared cap, enforced by `planImageBatches()`/`planAttachmentBatches()`. The
-standalone PowerShell script does not upload images or files — see below.
+is the shared cap, enforced by `planImageBatches()`/`planAttachmentBatches()`.
 
-### Standalone PowerShell, and long tickets
+### Freshservice ticket script
 
-`scripts/ask-ticket-standalone.ps1` is the self-contained pwsh 7+ version. It uses
-the **OS certificate store**, so corporate TLS-inspection roots work without
-`NODE_EXTRA_CA_CERTS`.
+`scripts/ask-ticket.js` fetches the ticket from Freshservice's private API and
+feeds the full conversation trace to Copilot as data. The payload is
+budget-truncated (head + tail) to stay under `--max-chars`, then loaded as the
+FIRST turn of one conversation so `--follow` reuses its context. Ticket
+attachments are not downloaded — their inventory (name, type, size, origin,
+signed URL) is appended to the prompt; images are additionally uploaded and
+attached in batches under the shared 3-per-message cap above.
 
-It does **not truncate** a long ticket. It renders the ticket as ordered sections
-(header, attachment manifest, each conversation, each inlined attachment), packs
-them into as many messages as the per-message budget allows, and sends them as
-successive turns of **one** M365 conversation, so the model holds the whole
-ticket when it answers. Intermediate turns ask for `ACK` to keep replies cheap.
-
-Attachments are **text only** here: every attachment is listed in the manifest, and
-text-bearing ones (logs, csv, json, …) are inlined verbatim. Images and other
-binaries are named but never uploaded (the Node API still supports uploads).
-
-The ticket is sent as-is — no PII or network redaction. M365's content filter can
-refuse a ticket whether or not identifiers are masked, so this script does not
-rewrite the content.
-
-By default the script steers the model with a built-in system prompt for a
-plain-text IT-support **ticket digest** (reported problem, what was tried, status
-and owner, next action) and forbids Markdown/emoji so the reply reads cleanly in
-a terminal. Override it with `$Config.SystemPrompt` or
-`M365_TICKET_SYSTEM_PROMPT`; `scripts/ask-ticket.js` uses the same default.
+The ticket text is sent as-is — no PII or network redaction. By default the
+script steers the model with a built-in system prompt for a plain-text
+IT-support **ticket digest**; override it with `M365_TICKET_SYSTEM_PROMPT`.
 
 ```sh
-# ask about a ticket (long ones split automatically); temporary chat by default
-pwsh -File scripts/ask-ticket-standalone.ps1 "Draft a concise customer reply." 24613
-
-# show the message split without spending any Copilot turns
-pwsh -File scripts/ask-ticket-standalone.ps1 -Plan "x" 24613
-
-# conversation control
-pwsh -File scripts/ask-ticket-standalone.ps1 -ConversationId <guid> "..." 24613
-pwsh -File scripts/ask-ticket-standalone.ps1 -LastConversation "..." 24613
-pwsh -File scripts/ask-ticket-standalone.ps1 -Persist "..." 24613   # memory ON
+node scripts/ask-ticket.js 10100 "Draft a concise customer reply."
+node scripts/ask-ticket.js --follow 10100 "Summarize the issue and action items."
+node scripts/ask-ticket.js --new 10100 "What is blocking this ticket?"
 ```
 
-**Conversation mode.** Every chat is **temporary by default** — the ChatHub URL
-carries `disableMemory=1`, so M365 keeps no long-term memory of it and it never
-appears in your history. `-Persist` turns memory back on. `-ConversationId`
-targets a specific conversation and `-LastConversation` reuses the id the script
-remembered from the previous run (`~/.config/m365-copilot/last-ticket-conversation.json`).
-Every run records the id it used, so `-LastConversation` works next time; note
-that resuming is only meaningful for a conversation that was **not** temporary.
-
-Limits that drive the split (all overridable via `$Config` or env):
-
-| Knob | Env | Default | Limit it enforces |
-|---|---|---|---|
-| `MaxTextChars` | `M365_TICKET_MAX_TEXT_CHARS` | 60000 | message text limit (per turn) |
-| `MaxMessages` | `M365_TICKET_MAX_MESSAGES` | 60 | safety cap on turns |
-| `MaxInlineFiles` | `M365_TICKET_MAX_INLINE_FILES` | 20 | attachment count limit |
-| `MaxInlineFileBytes` | `M365_TICKET_MAX_INLINE_FILE_BYTES` | 262144 | attachment size limit |
-| `MaxFileChars` | `M365_TICKET_MAX_FILE_CHARS` | 20000 | per-attachment inline budget |
-
-The caps are used to flag what would not fit. There is no separate "max
-attachments" setting: how many can be delivered is derived from `MaxMessages`,
-because **every attachment batch is also a turn** — with the default 60 turns
-and 3 attachments per message that is a budget of 180, far beyond any real
-ticket (the largest seen across 100 tickets was 4). It uploads them, attaches
-each batch through `messageAnnotations`, and splits them across turns at
-`MaxAttachmentsPerMessage` per turn.
+The M365 conversation is persisted and reused across runs by default; `--new`
+forces a fresh one (`M365_NO_SESSION_PERSIST=1` disables persistence entirely).
 
 Credentials come from `FRESHSERVICE_SUBDOMAIN`, `FRESHSERVICE_SESSION`,
-`FRESHSERVICE_BASE_URL`, `M365_REFRESH_TOKEN`/`M365_ACCESS_TOKEN`, or `$Config` —
-no fsvc, no repo imports.
+`FRESHSERVICE_BASE_URL`, or a `freshservice.json` — no fsvc.
 
 ## Models
 
@@ -461,13 +417,10 @@ src/session-store.js  persisted default conversation (session.json)
 src/prompt.js   prompt assembly: context wrapping + loading (no arg parsing — commander owns that)
 src/ticket.js   Freshservice ticket fetch/render
 src/log.js      optional debug logging (M365_DEBUG=1)
-scripts/        ask-ticket.js (repo imports), ask-ticket-standalone.ps1 (self-contained, pwsh 7+)
+scripts/        ask-ticket.js (Freshservice ticket → Copilot, repo imports)
 ```
 
-The ticket text is sent to Copilot as-is — no redaction. `ask-ticket-standalone.ps1` (PowerShell 7+) is the
-self-contained variant: it needs no Node and no repo imports, and uses the OS
-certificate store, so no `NODE_EXTRA_CA_CERTS` is needed on a TLS-inspecting
-corporate proxy.
+The ticket text is sent to Copilot as-is — no redaction.
 
 This is a trimmed extraction of `m365-copilot-proxy` (same authors' reverse
 engineering); it keeps only the plain-chat path. No tool-calling, agents, or

@@ -37,7 +37,6 @@
   "scripts": {
     "start": "node cli.js --help",
     "test": "node --test",
-    "test:ps": "pwsh -NoProfile -File scripts/ask-ticket-standalone.tests.ps1",
     "prepublishOnly": "npm test"
   },
   "engines": {

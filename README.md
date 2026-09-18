@@ -9,12 +9,53 @@ endpoint). You need a Microsoft 365 account with Copilot — nothing else.
 
 ## Install
 
+From npm (when published):
+
 ```sh
 npm install -g m365-copilot      # CLI on your PATH as `m365-copilot`
 # or, as a library:
 npm install m365-copilot         # import { ask, M365Session } from "m365-copilot"
 # or one-off, nothing installed:
 npx m365-copilot ask "..."
+```
+
+### Install straight from GitHub
+
+No npm release needed — install the latest `main` directly:
+
+```sh
+npm install -g github:dat267/m365-copilot      # CLI on your PATH
+# or as a dependency in another project:
+npm install github:dat267/m365-copilot
+# or one-off, nothing installed:
+npx github:dat267/m365-copilot ask "..."
+```
+
+Private repo? Use SSH instead:
+
+```sh
+npm install -g git+ssh://git@github.com/dat267/m365-copilot.git
+```
+
+Pin a version with `github:dat267/m365-copilot#<tag-or-sha>` (e.g. `#v0.1.0`).
+Note npm caches git installs; to pick up new `main` commits, re-run the
+install with `--force` (or pin a tag/SHA). Tokens are **not** part of the
+install — run `m365-copilot auth` once per machine (see below).
+
+### Pin a tag
+
+Tag releases in the repo (`git tag v0.1.0 && git push origin v0.1.0`) and
+install that tag for a stable deploy:
+
+```sh
+npm install -g github:dat267/m365-copilot#v0.1.0
+```
+
+### Updating
+
+```sh
+npm update -g m365-copilot       # when installed from npm
+npm install -g --force github:dat267/m365-copilot   # when installed from main
 ```
 
 Developing in this repo instead:

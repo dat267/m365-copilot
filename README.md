@@ -42,24 +42,52 @@ Note npm caches git installs; to pick up new `main` commits, re-run the
 install with `--force` (or pin a tag/SHA). Tokens are **not** part of the
 install — run `m365-copilot auth` once per machine (see below).
 
-### Windows
+### Windows (no admin required)
 
-Pure Node — same commands, three Windows-specific notes:
+Everything here is user-scope: npm's global prefix is `%APPDATA%\npm`, Chromium
+caches to `%LOCALAPPDATA%\ms-playwright`, tokens live in
+`%USERPROFILE%\.config\m365-copilot` — nothing touches system paths.
 
 ```powershell
-winget install OpenJS.NodeJS.LTS          # Node 18+ and npm
-winget install Git.Git                    # npm needs git for GitHub installs
+# In a plain PowerShell window (no elevation):
+
+# 1. Node LTS + git via scoop (user-space package manager; git is needed for
+#    GitHub installs). Set-ExecutionPolicy is user-scope and needs no admin.
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
+irm get.scoop.sh | iex
+scoop install nodejs-lts git
+
+# 2. Put npm's global bin dir on your user PATH (scoop's node doesn't add it)
+[Environment]::SetEnvironmentVariable(
+  "Path",
+  [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:APPDATA\npm",
+  "User")
+# ...then open a NEW terminal so the PATH change applies
+
+# 3. Install the CLI straight from GitHub
 npm install -g github:dat267/m365-copilot
+
+# 4. Auth — Playwright is optional, only interactive sign-in needs it
+npm install -g playwright
+npx playwright install chromium
+m365-copilot auth
 ```
 
-- **Config dir** is `%USERPROFILE%\.config\m365-copilot` (`homedir()`-based, not
-  `%APPDATA%`). Override with `M365_CONFIG_DIR`.
-- **Auth** needs Playwright: `npm install -g playwright && npx playwright
-  install chromium`, then `m365-copilot auth`. Token-only alternative (no
-  Chromium): `setx M365_REFRESH_TOKEN "<browser-copied token>"`.
-- **Corporate TLS** (Zscaler/Netskope): set the user env var `NODE_EXTRA_CA_CERTS`
-  to your corp root PEM (`sysdm.cpl` → Environment Variables, then reopen the
-  terminal). `M365_INSECURE=1` also exists but is blunt.
+No Chromium at all? Skip step 4 and set a browser-copied refresh token instead
+(user env var, no admin):
+
+```powershell
+setx M365_REFRESH_TOKEN "<paste the token>"
+```
+
+Corporate TLS (Zscaler/Netskope) — also just a user env var:
+
+```powershell
+setx NODE_EXTRA_CA_CERTS "%USERPROFILE%\certs\corp-root.pem"
+```
+
+Prefer not to use scoop: manually unzip Node's `win-x64` zip and MinGit into
+`%LOCALAPPDATA%` and add both to your user PATH — same result, same privileges.
 
 ### Pin a tag
 

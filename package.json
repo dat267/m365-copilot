@@ -1,0 +1,62 @@
+{
+  "name": "m365-copilot",
+  "version": "0.1.0",
+  "description": "Minimal programmatic M365 Copilot text generation (auth + one WebSocket chat client).",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dat267/m365-copilot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dat267/m365-copilot/issues"
+  },
+  "homepage": "https://github.com/dat267/m365-copilot#readme",
+  "keywords": [
+    "microsoft-365",
+    "m365",
+    "copilot",
+    "cli",
+    "ai",
+    "chat",
+    "llm"
+  ],
+  "bin": {
+    "m365-copilot": "./cli.js"
+  },
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "cli.js",
+    "src",
+    "!src/*.test.js"
+  ],
+  "scripts": {
+    "start": "node cli.js --help",
+    "test": "node --test",
+    "test:ps": "pwsh -NoProfile -File scripts/ask-ticket-standalone.tests.ps1",
+    "prepublishOnly": "npm test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@azure/msal-node": "^5.1.1",
+    "commander": "^14.0.2",
+    "ws": "^8.20.0"
+  },
+  "peerDependencies": {
+    "playwright": ">=1.40"
+  },
+  "peerDependenciesMeta": {
+    "playwright": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "playwright": "^1.58.2"
+  }
+}

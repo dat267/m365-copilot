@@ -42,6 +42,25 @@ Note npm caches git installs; to pick up new `main` commits, re-run the
 install with `--force` (or pin a tag/SHA). Tokens are **not** part of the
 install — run `m365-copilot auth` once per machine (see below).
 
+### Windows
+
+Pure Node — same commands, three Windows-specific notes:
+
+```powershell
+winget install OpenJS.NodeJS.LTS          # Node 18+ and npm
+winget install Git.Git                    # npm needs git for GitHub installs
+npm install -g github:dat267/m365-copilot
+```
+
+- **Config dir** is `%USERPROFILE%\.config\m365-copilot` (`homedir()`-based, not
+  `%APPDATA%`). Override with `M365_CONFIG_DIR`.
+- **Auth** needs Playwright: `npm install -g playwright && npx playwright
+  install chromium`, then `m365-copilot auth`. Token-only alternative (no
+  Chromium): `setx M365_REFRESH_TOKEN "<browser-copied token>"`.
+- **Corporate TLS** (Zscaler/Netskope): set the user env var `NODE_EXTRA_CA_CERTS`
+  to your corp root PEM (`sysdm.cpl` → Environment Variables, then reopen the
+  terminal). `M365_INSECURE=1` also exists but is blunt.
+
 ### Pin a tag
 
 Tag releases in the repo (`git tag v0.1.0 && git push origin v0.1.0`) and

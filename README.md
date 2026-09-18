@@ -54,7 +54,17 @@ node cli.js ask -m claude "..."
 # Prepend a file (or stdin with -) as data around the prompt
 node cli.js ask --context notes.md "Summarize this in 3 bullets."
 cat notes.txt | node cli.js ask -c - "Draft a customer reply."
+
+# Steer the answer with a system prompt
+node cli.js ask --system persona.md "Draft a status update."
+printf 'Be terse.' | node cli.js ask -s - "Is this outage handled?"
 ```
+
+**System prompt**: `ask` prepends a system prompt to the message (M365 has no
+system role). Resolution order: `--system <file|->` if given, else
+`SYSTEM.md` in the config dir (`~/.config/m365-copilot/`, override with
+`M365_CONFIG_DIR`) when that file exists, else none. The ticket scripts have
+their own built-in system prompt and ignore this setting.
 
 `ask` is always a temporary chat — M365 keeps no memory of it, it never appears
 in your chat history, and nothing is persisted locally. There is no REPL; this

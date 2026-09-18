@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildPrompt, loadContext } from "./prompt.js";
+import { buildPrompt, loadContext, resolveSystemPrompt } from "./prompt.js";
 
 test("buildPrompt wraps context as data and appends the instruction", () => {
   const context = "Ticket #10100\nCustomer: it is broken.";
@@ -55,4 +55,42 @@ test("loadContext reads stdin when the path is -", async () => {
 
 test("loadContext returns null when no context was requested", async () => {
   assert.equal(await loadContext(null, {}), null);
+});
+
+test("resolveSystemPrompt reads an explicit system file", async () => {
+  const io = { readFile: async (p) => `content:${p}`, readStdin: async () => "" };
+  assert.equal(await resolveSystemPrompt(io, { system: "sys.md" }), "content:sys.md");
+});
+
+test("resolveSystemPrompt reads stdin for -", async () => {
+  const io = {
+    readFile: async () => { throw new Error("should not read a file"); },
+    readStdin: async () => "PIPED SYSTEM",
+  };
+  assert.equal(await resolveSystemPrompt(io, { system: "-" }), "PIPED SYSTEM");
+});
+
+test("resolveSystemPrompt falls back to SYSTEM.md in the config dir", async () => {
+  const io = { readFile: async (p) => `content:${p}`, readStdin: async () => "" };
+  assert.equal(
+    await resolveSystemPrompt(io, { configDir: "/cfg" }),
+    "content:/cfg/SYSTEM.md",
+  );
+});
+
+test("resolveSystemPrompt returns empty when no SYSTEM.md exists", async () => {
+  const io = {
+    readFile: async () => { throw new Error("ENOENT"); },
+    readStdin: async () => "",
+  };
+  assert.equal(await resolveSystemPrompt(io, { configDir: "/cfg" }), "");
+  assert.equal(await resolveSystemPrompt(io, {}), "");
+});
+
+test("resolveSystemPrompt prefers the explicit file over SYSTEM.md", async () => {
+  const io = { readFile: async (p) => `content:${p}`, readStdin: async () => "" };
+  assert.equal(
+    await resolveSystemPrompt(io, { system: "mine.md", configDir: "/cfg" }),
+    "content:mine.md",
+  );
 });

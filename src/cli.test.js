@@ -50,7 +50,10 @@ test("ask prepends a --context payload as data around the prompt", async () => {
     },
     getAvailableModels: () => ["m365-copilot"],
     io: {
-      readFile: async () => "FILE DATA",
+      readFile: async (p) => {
+        if (p === "notes.txt") return "FILE DATA";
+        throw new Error("ENOENT");
+      },
       readStdin: async () => {
         throw new Error("stdin should not be read for a file context");
       },
@@ -109,4 +112,64 @@ test("the bin exposes both purposes through --help", () => {
 
   assert.match(help, /\bauth\b/);
   assert.match(help, /\bask\b/);
+});
+
+test("ask uses --system as the system prompt", async () => {
+  const seen = [];
+  const program = buildProgram({
+    ask: async (text, opts) => {
+      seen.push(text);
+      return "ANSWER";
+    },
+    getAvailableModels: () => ["m365-copilot"],
+    io: { readFile: async (p) => `SYS(${p})`, readStdin: async () => "" },
+    out: () => {},
+    err: () => {},
+  });
+
+  await program.parseAsync(["node", "m365-copilot", "ask", "--system", "sys.md", "hello"]);
+
+  assert.equal(seen[0], "SYS(sys.md)\n\nhello");
+});
+
+test("ask defaults to SYSTEM.md from the config dir when present", async () => {
+  const seen = [];
+  const program = buildProgram({
+    ask: async (text) => {
+      seen.push(text);
+      return "ANSWER";
+    },
+    getAvailableModels: () => ["m365-copilot"],
+    io: {
+      readFile: async (p) => (p.endsWith("SYSTEM.md") ? "CFG SYSTEM" : ""),
+      readStdin: async () => "",
+    },
+    out: () => {},
+    err: () => {},
+  });
+
+  await program.parseAsync(["node", "m365-copilot", "ask", "hello"]);
+
+  assert.equal(seen[0], "CFG SYSTEM\n\nhello");
+});
+
+test("ask sends no system prompt when there is none", async () => {
+  const seen = [];
+  const program = buildProgram({
+    ask: async (text) => {
+      seen.push(text);
+      return "ANSWER";
+    },
+    getAvailableModels: () => ["m365-copilot"],
+    io: {
+      readFile: async () => { throw new Error("ENOENT"); },
+      readStdin: async () => "",
+    },
+    out: () => {},
+    err: () => {},
+  });
+
+  await program.parseAsync(["node", "m365-copilot", "ask", "hello"]);
+
+  assert.equal(seen[0], "hello");
 });

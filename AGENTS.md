@@ -71,7 +71,7 @@ generation, no automated password/TOTP login.
 | `src/graph-upload.js` | document upload to OneDrive `copilotuploads` + `LocalFile` annotations (`spoId`, `toFileAnnotations`) |
 | `src/session-store.js` | persisted default conversation (`session.json`): id/turn-count resolution, load/save |
 | `src/cli.js` | command wiring: `auth` (Playwright sign-in) and `ask` (one-shot temporary chat, `--model`); deps injectable for tests |
-| `src/prompt.js` | prompt assembly (`buildPrompt` context wrapping, `loadContext`) — no arg parsing, commander owns that |
+| `src/prompt.js` | prompt assembly (`buildPrompt` context + system wrapping, `loadContext`, `resolveSystemPrompt`: `--system` → `SYSTEM.md` in the config dir → none) — no arg parsing, commander owns that |
 | `src/ticket.js` | Freshservice ticket fetch/render; repo-native config (`FRESHSERVICE_*` / `freshservice.json`) — **not** fsvc |
 | `src/index.js` | Public API: `ask()` (one-shot) and `M365Session` (multi-turn, handles auth + reconnect) |
 | `src/log.js` | Optional debug logging (`M365_DEBUG=1` → `~/.config/m365-copilot/debug.log`) |

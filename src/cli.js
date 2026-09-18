@@ -6,8 +6,10 @@
 
 import { Command, Option } from "commander";
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { ask as realAsk, getAvailableModels as realModels, loginInteractive as realLogin } from "./index.js";
-import { loadContext, buildPrompt } from "./prompt.js";
+import { loadContext, buildPrompt, resolveSystemPrompt } from "./prompt.js";
 
 export function buildProgram({
   ask = realAsk,
@@ -40,9 +42,17 @@ export function buildProgram({
         .default("m365-copilot"),
     )
     .option("-c, --context <file|->", "prepend a file (or stdin with -) to the prompt as data")
+    .option(
+      "-s, --system <file|->",
+      "system prompt file (or stdin with -); default: SYSTEM.md in the config dir when present",
+    )
     .action(async (parts, options) => {
       const context = await loadContext(options.context, io);
-      const answer = await ask(buildPrompt(context, parts.join(" ")), {
+      const system = await resolveSystemPrompt(io, {
+        system: options.system,
+        configDir: defaultConfigDir(),
+      });
+      const answer = await ask(buildPrompt(context, parts.join(" "), system), {
         model: options.model,
         temporary: true,
       });
@@ -50,6 +60,10 @@ export function buildProgram({
     });
 
   return program;
+}
+
+function defaultConfigDir() {
+  return process.env.M365_CONFIG_DIR || join(homedir(), ".config", "m365-copilot");
 }
 
 async function readStdin() {
